@@ -78,6 +78,7 @@ const textLayer: Layer = {
     id: 'content',
     source: { text: 'こんにちは', language: 'ja' },
     translation: { text: 'Hello', language: null },
+    dialogue: null,
     role: null,
     source_region: null,
   },
@@ -149,6 +150,7 @@ const preferences: Preferences = {
       target_language: 'en-US',
       instructions: null,
     },
+    dialogue: {},
     inpainting: { model: 'lama' },
     processor: {},
   },
@@ -179,6 +181,7 @@ const preferences: Preferences = {
       },
     ],
   },
+  speech: {},
   typesetting: {
     font_families: ['Noto Sans'],
   },
@@ -1011,8 +1014,9 @@ describe('greenfield editor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Processing settings' }))
     fireEvent.click(screen.getByRole('button', { name: /Scope Selection/ }))
     fireEvent.click(screen.getByRole('button', { name: /Entire project/ }))
-    fireEvent.click(screen.getByRole('button', { name: /Stages 4 stages/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Stages 5 stages/ }))
     fireEvent.click(screen.getByRole('button', { name: /Translation/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Dialogue/ }))
     fireEvent.click(screen.getByRole('button', { name: /Inpainting/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Run processing' }))
     await waitFor(() =>
@@ -1027,6 +1031,7 @@ describe('greenfield editor', () => {
     fireEvent.click(screen.getByRole('button', { name: /Selected pages/ }))
     fireEvent.click(screen.getByRole('button', { name: /Stages 2 stages/ }))
     fireEvent.click(screen.getByRole('button', { name: /Translation/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Dialogue/ }))
     fireEvent.click(screen.getByRole('button', { name: /Inpainting/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Run processing' }))
     await waitFor(() =>
@@ -1058,7 +1063,7 @@ describe('greenfield editor', () => {
     await waitFor(() => expect(commands.getTranslationModels).toHaveBeenCalled())
     expect(screen.getByRole('button', { name: /Model Gemma 4 E2B Instruct/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Scope Selection/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Stages 4 stages/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Stages 5 stages/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Output English/ })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
     expect(useKoharuStore.getState().settingsOpen).toBe(true)
@@ -1103,6 +1108,7 @@ describe('greenfield editor', () => {
         nextPreferences.pipeline,
         preferences.providers,
         preferences.typesetting,
+        preferences.speech,
       ),
     )
     expect(
@@ -1141,8 +1147,9 @@ describe('greenfield editor', () => {
     await user.click(screen.getByRole('button', { name: 'Processing settings' }))
     await user.click(screen.getByRole('button', { name: /Scope Selection/ }))
     await user.click(screen.getByRole('button', { name: /Entire project/ }))
-    await user.click(screen.getByRole('button', { name: /Stages 4 stages/ }))
+    await user.click(screen.getByRole('button', { name: /Stages 5 stages/ }))
     await user.click(screen.getByRole('button', { name: /Translation/ }))
+    await user.click(screen.getByRole('button', { name: /Dialogue/ }))
     await user.click(screen.getByRole('button', { name: /Inpainting/ }))
     await user.click(screen.getByRole('button', { name: 'Back' }))
     await user.click(screen.getByRole('button', { name: /Output English/ }))
@@ -1224,6 +1231,7 @@ describe('greenfield editor', () => {
         nextPreferences.pipeline,
         currentPreferences.providers,
         currentPreferences.typesetting,
+        currentPreferences.speech,
       ),
     )
     expect(useKoharuStore.getState().preferences?.pipeline.translation).toEqual(
@@ -1279,6 +1287,7 @@ describe('greenfield editor', () => {
         nextPreferences.pipeline,
         preferences.providers,
         preferences.typesetting,
+        preferences.speech,
       ),
     )
     expect(useKoharuStore.getState().preferences?.pipeline.translation).toEqual(
@@ -1343,6 +1352,7 @@ describe('greenfield editor', () => {
         }),
         preferences.providers,
         preferences.typesetting,
+        preferences.speech,
       ),
     )
     fireEvent.click(screen.getByRole('button', { name: 'Providers' }))
@@ -1371,6 +1381,7 @@ describe('greenfield editor', () => {
         }),
         preferences.providers,
         preferences.typesetting,
+        preferences.speech,
       ),
     )
     const vision = screen.getByRole('switch', { name: 'Vision' })
@@ -1387,6 +1398,7 @@ describe('greenfield editor', () => {
         }),
         preferences.providers,
         preferences.typesetting,
+        preferences.speech,
       ),
     )
     expect(screen.getByLabelText('Translation model')).toHaveTextContent('Gemma 4 E2B Instruct')
@@ -1469,6 +1481,7 @@ describe('greenfield editor', () => {
         }),
         configured.providers,
         configured.typesetting,
+        configured.speech,
       ),
     )
   })
@@ -1576,6 +1589,7 @@ describe('greenfield editor', () => {
         }),
         preferences.providers,
         preferences.typesetting,
+        preferences.speech,
       ),
     )
   })
@@ -1722,15 +1736,25 @@ describe('greenfield editor', () => {
     await user.click(await screen.findByRole('option', { name: 'Arial, System' }))
 
     await waitFor(() =>
-      expect(save).toHaveBeenLastCalledWith(preferences.pipeline, preferences.providers, {
-        font_families: ['Noto Sans', 'Arial'],
-      }),
+      expect(save).toHaveBeenLastCalledWith(
+        preferences.pipeline,
+        preferences.providers,
+        {
+          font_families: ['Noto Sans', 'Arial'],
+        },
+        preferences.speech,
+      ),
     )
     await user.click(screen.getByRole('button', { name: 'Remove Noto Sans' }))
     await waitFor(() =>
-      expect(save).toHaveBeenLastCalledWith(preferences.pipeline, preferences.providers, {
-        font_families: ['Arial'],
-      }),
+      expect(save).toHaveBeenLastCalledWith(
+        preferences.pipeline,
+        preferences.providers,
+        {
+          font_families: ['Arial'],
+        },
+        preferences.speech,
+      ),
     )
   })
 

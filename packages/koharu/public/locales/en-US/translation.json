@@ -169,10 +169,14 @@
     "border": "Border",
     "borderColor": "Border color",
     "borderWidth": "Border width",
+    "character": "Character",
+    "chooseCharacter": "Choose who voices {{name}}",
     "chooseFontSize": "Choose font size",
+    "clonedVoice": "Cloned voice",
     "color": "Color",
     "customFrame": "Custom frame",
     "decreaseBorderWidth": "Decrease border width",
+    "dialogue": "Dialogue",
     "direction": "Direction",
     "font": "Font",
     "fontSize": "Font size",
@@ -185,6 +189,7 @@
     "fontWeight": "Font weight",
     "horizontal": "Horizontal",
     "increaseBorderWidth": "Increase border width",
+    "noCharacter": "No character",
     "opacity": "Opacity",
     "placement": "Placement",
     "resetAutoFit": "Reset to auto fit",
@@ -213,7 +218,9 @@
     "zh-TW": "繁體中文"
   },
   "layers": {
+    "characterLabel": "{{name}} character",
     "delete": "Delete {{name}}",
+    "dialogueLabel": "{{name}} dialogue",
     "edit": "Edit {{name}}",
     "empty": "No layers on this page.",
     "hide": "Hide {{name}}",
@@ -308,12 +315,14 @@
   },
   "phase": {
     "detection": "Detection",
+    "dialogue": "Dialogue",
     "inpainting": "Inpainting",
     "ocr": "OCR",
     "translation": "Translation"
   },
   "phaseDescription": {
     "detection": "Locate text on the page.",
+    "dialogue": "Add voice cues like [sighs] and name each speaker.",
     "inpainting": "Rebuild the artwork behind removed text.",
     "ocr": "Read the text inside each region.",
     "translation": "Convert source text to the target language."
@@ -423,11 +432,48 @@
       "title": "Shortcuts",
       "tools": "Tools"
     },
+    "speech": {
+      "addVoice": "Add voice",
+      "character": "Character",
+      "cpuExpertLayers": "CPU expert layers",
+      "cpuExpertLayersDescription": "Expert layers kept in system RAM. Empty picks a value from GPU memory; raise it if the GPU runs out of memory.",
+      "description": "Voice translated dialogue on your GPU.",
+      "direction": "Dialogue direction",
+      "directionDescription": "The dialogue stage uses the translation model to add cues and name speakers.",
+      "download": "Download ({{size}} GB)",
+      "downloading": "Downloading…",
+      "frames": "Frames",
+      "installed": "Installed",
+      "instructions": "Instructions",
+      "instructionsPlaceholder": "For example: keep cues subtle; Mika speaks softly.",
+      "layers": "Layers",
+      "maxTokens": "Line length limit",
+      "maxTokensDescription": "Maximum audio frames per line, about 21 per second.",
+      "model": "Local model file",
+      "modelDescription": "Optional Drama 3 GGUF file that replaces the managed download.",
+      "modelLocal": "Using the local model file below.",
+      "modelMissing": "Drama 3 is not downloaded",
+      "modelReady": "Drama 3 is ready",
+      "referenceAudio": "Reference WAV path",
+      "referenceText": "Reference transcript",
+      "removeVoice": "Remove voice for {{character}}",
+      "runtime": "Voice runtime",
+      "runtimeDescription": "The speech server starts on demand and stops with the app.",
+      "server": "Local server build",
+      "serverDescription": "Optional audiocpp_server executable that replaces the managed one.",
+      "threads": "CPU threads",
+      "title": "Speech",
+      "voiceModel": "Voice model",
+      "voiceModelDescription": "Fish Audio Drama 3. Requires an NVIDIA GPU with CUDA.",
+      "voices": "Character voices",
+      "voicesDescription": "Give a character a consistent voice with a short WAV recording and its exact transcript."
+    },
     "tabs": {
       "appearance": "Appearance",
       "pipeline": "Pipeline",
       "providers": "Providers",
       "shortcuts": "Shortcuts",
+      "speech": "Speech",
       "translation": "Translation",
       "typesetting": "Typesetting"
     },
@@ -462,6 +508,12 @@
       "removeFamily": "Remove {{family}}",
       "title": "Typesetting"
     }
+  },
+  "speech": {
+    "play": "Play dialogue",
+    "regenerate": "Regenerate voice",
+    "stop": "Stop dialogue",
+    "voicing": "Voicing dialogue…"
   },
   "start": {
     "create": "Create",

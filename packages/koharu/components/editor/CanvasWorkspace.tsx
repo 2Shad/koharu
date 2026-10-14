@@ -10,6 +10,7 @@ import { StatusBar } from '@/components/editor/StatusBar'
 import { ToolBar } from '@/components/editor/ToolBar'
 import { useCanvas } from '@/components/editor/useCanvas'
 import { call } from '@/lib/backend'
+import { stopSpeech } from '@/lib/speech'
 import { expandLayerSelection } from '@/lib/document'
 import {
   controlFrame,
@@ -117,6 +118,7 @@ export function CanvasWorkspace() {
   const canvasState = useCanvas(canvasElement, canvasRevision, canvasGeneration)
   const canvas = canvasState.canvas
   const pageId = page?.id
+  useEffect(() => stopSpeech, [pageId])
   const pageWidth = canvasSize[0] || page?.size.width
   const pageHeight = canvasSize[1] || page?.size.height
   const activeRaster =

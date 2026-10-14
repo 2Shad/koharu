@@ -11,6 +11,7 @@ import {
   Palette,
   Sun,
   Type,
+  Volume2,
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -23,6 +24,7 @@ import {
   PreferenceSection,
 } from '@/components/preferences/PreferenceFields'
 import { ProviderPreferences } from '@/components/preferences/ProviderPreferences'
+import { SpeechPreferences } from '@/components/preferences/SpeechPreferences'
 import { TranslationPreferences } from '@/components/preferences/TranslationPreferences'
 import { TypesettingPreferences } from '@/components/preferences/TypesettingPreferences'
 import { refreshPreferences, refreshTranslationModels, savePreferences } from '@/lib/backend'
@@ -32,6 +34,7 @@ import {
   type PipelineConfig,
   type Preferences,
   type ProviderPreferences as ProviderSettings,
+  type SpeechConfig,
   type TypesettingConfig,
 } from '@koharu/bridge/protocol'
 import { Button } from '@koharu/ui/components/button'
@@ -51,6 +54,7 @@ const tabs = [
   ['providers', KeyRound],
   ['translation', Languages],
   ['typesetting', Type],
+  ['speech', Volume2],
   ['shortcuts', Keyboard],
 ] as const
 type Tab = (typeof tabs)[number][0]
@@ -69,6 +73,7 @@ export function SettingsPage() {
   const [typesetting, setTypesetting] = useState<TypesettingConfig | null>(
     preferences?.typesetting ?? null,
   )
+  const [speech, setSpeech] = useState<SpeechConfig | null>(preferences?.speech ?? null)
   const translation = pipeline?.translation ?? null
   const lastSaved = useRef<string | null>(null)
   const lastSavedProviders = useRef<string | null>(null)
@@ -77,15 +82,18 @@ export function SettingsPage() {
   const lastPending = useRef<{ serialized: string; promise: Promise<Preferences> } | null>(null)
   const currentDraft = useRef<string | null>(null)
   currentDraft.current =
-    pipeline && providers && typesetting ? JSON.stringify([pipeline, providers, typesetting]) : null
+    pipeline && providers && typesetting && speech
+      ? JSON.stringify([pipeline, providers, typesetting, speech])
+      : null
 
   const saveDraft = useCallback(
     async (
       pipeline: PipelineConfig,
       providers: ProviderSettings,
       typesetting: TypesettingConfig,
+      speech: SpeechConfig,
     ) => {
-      const serialized = JSON.stringify([pipeline, providers, typesetting])
+      const serialized = JSON.stringify([pipeline, providers, typesetting, speech])
       if (serialized === lastSaved.current) {
         const pending = lastPending.current
         if (pending?.serialized === serialized) await pending.promise
@@ -97,7 +105,7 @@ export function SettingsPage() {
       const generation = ++saveGeneration.current
       const pending = saveQueue.current
         .catch(() => undefined)
-        .then(() => savePreferences(pipeline, providers, typesetting))
+        .then(() => savePreferences(pipeline, providers, typesetting, speech))
       lastPending.current = { serialized, promise: pending }
       saveQueue.current = pending.then(
         () => undefined,
@@ -131,25 +139,27 @@ export function SettingsPage() {
     setPipeline(preferences?.pipeline ?? null)
     setProviders(preferences?.providers ?? null)
     setTypesetting(preferences?.typesetting ?? null)
+    setSpeech(preferences?.speech ?? null)
     if (preferences) {
       lastSaved.current = JSON.stringify([
         preferences.pipeline,
         preferences.providers,
         preferences.typesetting,
+        preferences.speech,
       ])
       lastSavedProviders.current = JSON.stringify(preferences.providers)
     }
   }, [open, preferences])
 
   useEffect(() => {
-    if (!open || !pipeline || !providers || !typesetting) return
-    const serialized = JSON.stringify([pipeline, providers, typesetting])
+    if (!open || !pipeline || !providers || !typesetting || !speech) return
+    const serialized = JSON.stringify([pipeline, providers, typesetting, speech])
     if (serialized === lastSaved.current) return
     const timeout = window.setTimeout(() => {
-      void saveDraft(pipeline, providers, typesetting).catch(() => undefined)
+      void saveDraft(pipeline, providers, typesetting, speech).catch(() => undefined)
     }, 260)
     return () => window.clearTimeout(timeout)
-  }, [open, pipeline, providers, saveDraft, typesetting])
+  }, [open, pipeline, providers, saveDraft, speech, typesetting])
 
   if (!open) return null
 
@@ -161,11 +171,11 @@ export function SettingsPage() {
           variant='ghost'
           className='mb-5 h-9 justify-start gap-2 rounded-lg px-2 text-[12px] text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground'
           onClick={() => {
-            if (!pipeline || !providers || !typesetting) {
+            if (!pipeline || !providers || !typesetting || !speech) {
               setOpen(false)
               return
             }
-            void saveDraft(pipeline, providers, typesetting)
+            void saveDraft(pipeline, providers, typesetting, speech)
               .then(() => setOpen(false))
               .catch(() => undefined)
           }}
@@ -227,6 +237,19 @@ export function SettingsPage() {
             {tab === 'typesetting' &&
               (typesetting ? (
                 <TypesettingPreferences value={typesetting} onChange={setTypesetting} />
+              ) : (
+                <LoadingPreferences />
+              ))}
+            {tab === 'speech' &&
+              (speech && pipeline ? (
+                <SpeechPreferences
+                  value={speech}
+                  dialogue={pipeline.dialogue}
+                  onChange={setSpeech}
+                  onDialogueChange={(dialogue) =>
+                    setPipeline((current) => (current ? { ...current, dialogue } : current))
+                  }
+                />
               ) : (
                 <LoadingPreferences />
               ))}

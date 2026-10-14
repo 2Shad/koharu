@@ -169,10 +169,14 @@
     "border": "Kenarlık",
     "borderColor": "Kenarlık rengi",
     "borderWidth": "Kenarlık genişliği",
+    "character": "Karakter",
+    "chooseCharacter": "{{name}} için seslendireni seçin",
     "chooseFontSize": "Yazı tipi boyutunu seç",
+    "clonedVoice": "Klonlanmış ses",
     "color": "Renk",
     "customFrame": "Özel çerçeve",
     "decreaseBorderWidth": "Kenarlık genişliğini azalt",
+    "dialogue": "Diyalog",
     "direction": "Yön",
     "font": "Yazı tipi",
     "fontSize": "Yazı tipi boyutu",
@@ -185,6 +189,7 @@
     "fontWeight": "Yazı tipi kalınlığı",
     "horizontal": "Yatay",
     "increaseBorderWidth": "Kenarlık genişliğini artır",
+    "noCharacter": "Karakter yok",
     "opacity": "Opaklık",
     "placement": "Yerleşim",
     "resetAutoFit": "Otomatik sığdırmaya sıfırla",
@@ -213,7 +218,9 @@
     "zh-TW": "繁體中文"
   },
   "layers": {
+    "characterLabel": "{{name}} karakteri",
     "delete": "{{name}} öğesini sil",
+    "dialogueLabel": "{{name}} diyaloğu",
     "edit": "{{name}} öğesini düzenle",
     "empty": "Bu sayfada katman yok.",
     "hide": "{{name}} öğesini gizle",
@@ -308,12 +315,14 @@
   },
   "phase": {
     "detection": "Algılama",
+    "dialogue": "Diyalog",
     "inpainting": "Doldurma",
     "ocr": "OCR",
     "translation": "Çeviri"
   },
   "phaseDescription": {
     "detection": "Sayfadaki metni bulur.",
+    "dialogue": "[sighs] gibi ses işaretleri ekler ve konuşanları adlandırır.",
     "inpainting": "Metin kaldırıldıktan sonra çizimi yeniden oluşturur.",
     "ocr": "Her bölgenin içindeki metni okur.",
     "translation": "Kaynak metni hedef dile çevirir."
@@ -423,11 +432,48 @@
       "title": "Kısayollar",
       "tools": "Araçlar"
     },
+    "speech": {
+      "addVoice": "Ses ekle",
+      "character": "Karakter",
+      "cpuExpertLayers": "CPU uzman katmanları",
+      "cpuExpertLayersDescription": "Sistem RAM'inde tutulan uzman katmanları. Boş bırakılırsa GPU belleğine göre seçilir; GPU belleği yetmezse artırın.",
+      "description": "Çevrilmiş diyalogları GPU'nuzda seslendirin.",
+      "direction": "Diyalog yönetimi",
+      "directionDescription": "Diyalog aşaması, işaret eklemek ve konuşanları adlandırmak için çeviri modelini kullanır.",
+      "download": "İndir ({{size}} GB)",
+      "downloading": "İndiriliyor…",
+      "frames": "Kareler",
+      "installed": "Yüklendi",
+      "instructions": "Talimatlar",
+      "instructionsPlaceholder": "Örneğin: işaretler hafif olsun; Mika alçak sesle konuşur.",
+      "layers": "Katmanlar",
+      "maxTokens": "Satır uzunluğu sınırı",
+      "maxTokensDescription": "Satır başına en fazla ses karesi, saniyede yaklaşık 21.",
+      "model": "Yerel model dosyası",
+      "modelDescription": "Yönetilen indirmenin yerine geçen isteğe bağlı Drama 3 GGUF dosyası.",
+      "modelLocal": "Aşağıdaki yerel model dosyası kullanılıyor.",
+      "modelMissing": "Drama 3 indirilmedi",
+      "modelReady": "Drama 3 hazır",
+      "referenceAudio": "Referans WAV yolu",
+      "referenceText": "Referans dökümü",
+      "removeVoice": "{{character}} sesini kaldır",
+      "runtime": "Ses motoru",
+      "runtimeDescription": "Ses sunucusu gerektiğinde başlar ve uygulamayla birlikte kapanır.",
+      "server": "Yerel sunucu",
+      "serverDescription": "Yönetilen sunucunun yerine geçen isteğe bağlı audiocpp_server.",
+      "threads": "CPU iş parçacıkları",
+      "title": "Ses",
+      "voiceModel": "Ses modeli",
+      "voiceModelDescription": "Fish Audio Drama 3. CUDA destekli bir NVIDIA GPU gerekir.",
+      "voices": "Karakter sesleri",
+      "voicesDescription": "Kısa bir WAV kaydı ve tam dökümüyle bir karaktere tutarlı bir ses verin."
+    },
     "tabs": {
       "appearance": "Görünüm",
       "pipeline": "İşlem hattı",
       "providers": "Sağlayıcılar",
       "shortcuts": "Kısayollar",
+      "speech": "Ses",
       "translation": "Çeviri",
       "typesetting": "Dizgi"
     },
@@ -462,6 +508,12 @@
       "removeFamily": "{{family}} ailesini kaldır",
       "title": "Dizgi"
     }
+  },
+  "speech": {
+    "play": "Diyaloğu oynat",
+    "regenerate": "Sesi yeniden oluştur",
+    "stop": "Diyaloğu durdur",
+    "voicing": "Seslendiriliyor…"
   },
   "start": {
     "create": "Oluştur",

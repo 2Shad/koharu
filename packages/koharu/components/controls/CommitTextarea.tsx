@@ -6,7 +6,8 @@ import { Textarea } from '@koharu/ui/components/textarea'
 
 type CommitTextareaProps = Omit<ComponentProps<typeof Textarea>, 'value' | 'onChange'> & {
   value: string
-  delay?: number
+  /** Debounce before committing while typing; `null` commits only on blur. */
+  delay?: number | null
   onCommit: (value: string) => void
 }
 
@@ -14,11 +15,12 @@ export function CommitTextarea({ value, delay = 360, onCommit, ...props }: Commi
   const [draft, setDraft] = useState(value)
   const timer = useRef<number | null>(null)
   const composing = useRef(false)
+  const dirty = useRef(false)
   const external = useRef(value)
 
   useEffect(() => {
     external.current = value
-    if (!composing.current && timer.current === null) setDraft(value)
+    if (!composing.current && !dirty.current) setDraft(value)
   }, [value])
 
   useEffect(
@@ -31,12 +33,14 @@ export function CommitTextarea({ value, delay = 360, onCommit, ...props }: Commi
   const commit = (next: string) => {
     if (timer.current !== null) window.clearTimeout(timer.current)
     timer.current = null
+    dirty.current = false
     if (next !== external.current) onCommit(next)
   }
 
   const schedule = (next: string) => {
+    dirty.current = true
     if (timer.current !== null) window.clearTimeout(timer.current)
-    timer.current = window.setTimeout(() => commit(next), delay)
+    timer.current = delay === null ? null : window.setTimeout(() => commit(next), delay)
   }
 
   return (

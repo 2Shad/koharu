@@ -169,10 +169,14 @@
     "border": "Contorno",
     "borderColor": "Color del contorno",
     "borderWidth": "Ancho del contorno",
+    "character": "Personaje",
+    "chooseCharacter": "Elegir quién pone voz a {{name}}",
     "chooseFontSize": "Elegir tamaño de fuente",
+    "clonedVoice": "Voz clonada",
     "color": "Color",
     "customFrame": "Marco personalizado",
     "decreaseBorderWidth": "Reducir ancho del contorno",
+    "dialogue": "Diálogo",
     "direction": "Dirección",
     "font": "Fuente",
     "fontSize": "Tamaño de fuente",
@@ -185,6 +189,7 @@
     "fontWeight": "Grosor de fuente",
     "horizontal": "Horizontal",
     "increaseBorderWidth": "Aumentar ancho del contorno",
+    "noCharacter": "Sin personaje",
     "opacity": "Opacidad",
     "placement": "Colocación",
     "resetAutoFit": "Restablecer ajuste automático",
@@ -213,7 +218,9 @@
     "zh-TW": "繁體中文"
   },
   "layers": {
+    "characterLabel": "Personaje de {{name}}",
     "delete": "Eliminar {{name}}",
+    "dialogueLabel": "Diálogo de {{name}}",
     "edit": "Editar {{name}}",
     "empty": "No hay capas en esta página.",
     "hide": "Ocultar {{name}}",
@@ -308,12 +315,14 @@
   },
   "phase": {
     "detection": "Detección",
+    "dialogue": "Diálogo",
     "inpainting": "Relleno",
     "ocr": "OCR",
     "translation": "Traducción"
   },
   "phaseDescription": {
     "detection": "Localiza el texto en la página.",
+    "dialogue": "Añade indicaciones de voz como [sighs] y nombra a cada hablante.",
     "inpainting": "Reconstruye el dibujo tras eliminar el texto.",
     "ocr": "Lee el texto dentro de cada región.",
     "translation": "Convierte el texto original al idioma de destino."
@@ -423,11 +432,48 @@
       "title": "Atajos",
       "tools": "Herramientas"
     },
+    "speech": {
+      "addVoice": "Añadir voz",
+      "character": "Personaje",
+      "cpuExpertLayers": "Capas de expertos en CPU",
+      "cpuExpertLayersDescription": "Capas de expertos en la RAM del sistema. Vacío elige un valor según la memoria de la GPU; auméntalo si la GPU se queda sin memoria.",
+      "description": "Pon voz al diálogo traducido en tu GPU.",
+      "direction": "Dirección del diálogo",
+      "directionDescription": "La etapa de diálogo usa el modelo de traducción para añadir indicaciones y nombrar a los hablantes.",
+      "download": "Descargar ({{size}} GB)",
+      "downloading": "Descargando…",
+      "frames": "Fotogramas",
+      "installed": "Instalado",
+      "instructions": "Instrucciones",
+      "instructionsPlaceholder": "Por ejemplo: indicaciones sutiles; Mika habla en voz baja.",
+      "layers": "Capas",
+      "maxTokens": "Límite de longitud por línea",
+      "maxTokensDescription": "Máximo de fotogramas de audio por línea, unos 21 por segundo.",
+      "model": "Archivo de modelo local",
+      "modelDescription": "Archivo GGUF de Drama 3 opcional que sustituye a la descarga gestionada.",
+      "modelLocal": "Se usa el archivo de modelo local de abajo.",
+      "modelMissing": "Drama 3 no está descargado",
+      "modelReady": "Drama 3 está listo",
+      "referenceAudio": "Ruta del WAV de referencia",
+      "referenceText": "Transcripción de referencia",
+      "removeVoice": "Quitar la voz de {{character}}",
+      "runtime": "Motor de voz",
+      "runtimeDescription": "El servidor de voz se inicia al necesitarse y se detiene con la aplicación.",
+      "server": "Servidor local",
+      "serverDescription": "Ejecutable audiocpp_server opcional que sustituye al gestionado.",
+      "threads": "Hilos de CPU",
+      "title": "Voz",
+      "voiceModel": "Modelo de voz",
+      "voiceModelDescription": "Fish Audio Drama 3. Requiere una GPU NVIDIA con CUDA.",
+      "voices": "Voces de personajes",
+      "voicesDescription": "Da a un personaje una voz constante con una grabación WAV corta y su transcripción exacta."
+    },
     "tabs": {
       "appearance": "Apariencia",
       "pipeline": "Canalización",
       "providers": "Proveedores",
       "shortcuts": "Atajos",
+      "speech": "Voz",
       "translation": "Traducción",
       "typesetting": "Composición"
     },
@@ -462,6 +508,12 @@
       "removeFamily": "Eliminar {{family}}",
       "title": "Composición tipográfica"
     }
+  },
+  "speech": {
+    "play": "Reproducir diálogo",
+    "regenerate": "Regenerar voz",
+    "stop": "Detener diálogo",
+    "voicing": "Generando voz…"
   },
   "start": {
     "create": "Crear",

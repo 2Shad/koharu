@@ -169,10 +169,14 @@
     "border": "Обводка",
     "borderColor": "Цвет обводки",
     "borderWidth": "Ширина обводки",
+    "character": "Персонаж",
+    "chooseCharacter": "Выбрать, кто озвучивает: {{name}}",
     "chooseFontSize": "Выбрать размер шрифта",
+    "clonedVoice": "Клонированный голос",
     "color": "Цвет",
     "customFrame": "Пользовательская рамка",
     "decreaseBorderWidth": "Уменьшить ширину обводки",
+    "dialogue": "Реплика",
     "direction": "Направление",
     "font": "Шрифт",
     "fontSize": "Размер шрифта",
@@ -185,6 +189,7 @@
     "fontWeight": "Насыщенность шрифта",
     "horizontal": "Горизонтально",
     "increaseBorderWidth": "Увеличить ширину обводки",
+    "noCharacter": "Без персонажа",
     "opacity": "Непрозрачность",
     "placement": "Размещение",
     "resetAutoFit": "Вернуть автоподгонку",
@@ -213,7 +218,9 @@
     "zh-TW": "繁體中文"
   },
   "layers": {
+    "characterLabel": "Персонаж: {{name}}",
     "delete": "Удалить {{name}}",
+    "dialogueLabel": "Реплика: {{name}}",
     "edit": "Изменить {{name}}",
     "empty": "На этой странице нет слоёв.",
     "hide": "Скрыть {{name}}",
@@ -308,12 +315,14 @@
   },
   "phase": {
     "detection": "Обнаружение",
+    "dialogue": "Озвучка реплик",
     "inpainting": "Восстановление",
     "ocr": "OCR",
     "translation": "Перевод"
   },
   "phaseDescription": {
     "detection": "Находит текст на странице.",
+    "dialogue": "Добавить голосовые пометки вроде [sighs] и указать говорящих.",
     "inpainting": "Восстанавливает рисунок после удаления текста.",
     "ocr": "Считывает текст внутри каждой области.",
     "translation": "Переводит исходный текст на целевой язык."
@@ -423,11 +432,48 @@
       "title": "Сочетания клавиш",
       "tools": "Инструменты"
     },
+    "speech": {
+      "addVoice": "Добавить голос",
+      "character": "Персонаж",
+      "cpuExpertLayers": "Слои экспертов на ЦП",
+      "cpuExpertLayersDescription": "Слои экспертов в системной памяти. Пусто — выбор по объёму видеопамяти; увеличьте, если её не хватает.",
+      "description": "Озвучивайте переведённые реплики на видеокарте.",
+      "direction": "Режиссура реплик",
+      "directionDescription": "Этап озвучки использует модель перевода, чтобы добавить пометки и указать говорящих.",
+      "download": "Скачать ({{size}} ГБ)",
+      "downloading": "Загрузка…",
+      "frames": "Кадры",
+      "installed": "Установлено",
+      "instructions": "Указания",
+      "instructionsPlaceholder": "Например: пометки сдержанные; Мика говорит тихо.",
+      "layers": "Слои",
+      "maxTokens": "Ограничение длины реплики",
+      "maxTokensDescription": "Максимум аудиокадров на реплику, около 21 в секунду.",
+      "model": "Локальный файл модели",
+      "modelDescription": "Необязательный файл Drama 3 GGUF вместо управляемой загрузки.",
+      "modelLocal": "Используется локальный файл модели ниже.",
+      "modelMissing": "Drama 3 не загружена",
+      "modelReady": "Drama 3 готова",
+      "referenceAudio": "Путь к эталонному WAV",
+      "referenceText": "Расшифровка эталона",
+      "removeVoice": "Удалить голос: {{character}}",
+      "runtime": "Движок озвучки",
+      "runtimeDescription": "Сервер озвучки запускается по требованию и останавливается вместе с приложением.",
+      "server": "Локальный сервер",
+      "serverDescription": "Необязательный audiocpp_server вместо управляемого.",
+      "threads": "Потоки ЦП",
+      "title": "Озвучка",
+      "voiceModel": "Модель озвучки",
+      "voiceModelDescription": "Fish Audio Drama 3. Нужна видеокарта NVIDIA с CUDA.",
+      "voices": "Голоса персонажей",
+      "voicesDescription": "Задайте персонажу постоянный голос по короткой записи WAV и её точной расшифровке."
+    },
     "tabs": {
       "appearance": "Оформление",
       "pipeline": "Конвейер",
       "providers": "Провайдеры",
       "shortcuts": "Сочетания клавиш",
+      "speech": "Озвучка",
       "translation": "Перевод",
       "typesetting": "Вёрстка"
     },
@@ -462,6 +508,12 @@
       "removeFamily": "Удалить {{family}}",
       "title": "Вёрстка"
     }
+  },
+  "speech": {
+    "play": "Воспроизвести реплику",
+    "regenerate": "Озвучить заново",
+    "stop": "Остановить реплику",
+    "voicing": "Озвучивание…"
   },
   "start": {
     "create": "Создать",

@@ -21,8 +21,8 @@ import {
   usePages,
   useProject,
 } from '@/lib/queries'
-import { useKoharuStore } from '@/lib/store'
-import { commands, type Operation, type Scope, type Stage } from '@koharu/bridge/protocol'
+import { pipelineStages, useKoharuStore } from '@/lib/store'
+import { commands, type Operation, type Scope } from '@koharu/bridge/protocol'
 import {
   Menubar,
   MenubarContent as UiMenubarContent,
@@ -211,14 +211,14 @@ export function TitleBar() {
                 onClick={() =>
                   run(
                     { scope: 'entities', value: selectedLayers },
-                    { operation: 'stages', stages: ['ocr', 'translation'] },
+                    { operation: 'stages', stages: ['ocr', 'translation', 'dialogue'] },
                   )
                 }
               >
                 {t('menu.processLayers')}
               </MenubarItem>
               <MenubarSeparator />
-              {(['detection', 'ocr', 'translation', 'inpainting'] as Stage[]).map((stage) => (
+              {pipelineStages.map((stage) => (
                 <MenubarItem
                   key={stage}
                   disabled={!project || pages.length === 0}

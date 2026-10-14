@@ -40,12 +40,14 @@ const preferences: Preferences = {
       target_language: 'en-US',
       instructions: null,
     },
+    dialogue: {},
     inpainting: { model: 'lama' },
     processor: {},
   },
   providers: {
     entries: [],
   },
+  speech: {},
   typesetting: {
     font_families: ['CCWildWords', 'Adobe 黑体 Std'],
   },

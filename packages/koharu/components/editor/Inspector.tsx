@@ -15,8 +15,10 @@ import {
   Image as ImageIcon,
   Layers3,
   Lock,
+  Mic,
   Minus,
   Plus,
+  RefreshCw,
   RotateCcw,
   Trash2,
   Type,
@@ -27,6 +29,7 @@ import { useTranslation } from 'react-i18next'
 import { ColorWell } from '@/components/controls/ColorWell'
 import { CommitTextarea } from '@/components/controls/CommitTextarea'
 import { FontPicker } from '@/components/controls/FontPicker'
+import { SpeechButton } from '@/components/editor/SpeechButton'
 import { call } from '@/lib/backend'
 import {
   expandLayerSelection,
@@ -36,6 +39,7 @@ import {
   layerChildren,
 } from '@/lib/document'
 import { pageKey, projectKey, queryClient, refresh, useFonts, usePage } from '@/lib/queries'
+import { castMembers, playSpeech, useSpeech } from '@/lib/speech'
 import { useKoharuStore } from '@/lib/store'
 import { previewCanvasOpacity } from '@koharu/bridge/canvas'
 import {
@@ -56,6 +60,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from '@koharu/ui/components/dropdown-menu'
+import { Input } from '@koharu/ui/components/input'
 import {
   NumberField,
   NumberFieldDecrement,
@@ -901,9 +906,139 @@ function LayerEditor({ layer, onDelete }: { layer: Layer; onDelete?: () => void 
               }
             />
           </InspectorField>
+          <DialogueField layer={layer} name={name} />
         </>
       )}
     </div>
+  )
+}
+
+function DialogueField({ layer, name }: { layer: Extract<Layer, { type: 'text' }>; name: string }) {
+  const { t } = useTranslation()
+  const translation = layer.content.translation?.text ?? ''
+  const dialogue = layer.content.dialogue
+  const savedCharacter = dialogue?.character ?? ''
+  const [character, setCharacter] = useState(savedCharacter)
+  const voicing = useSpeech((state) => state.layer === layer.id && state.status === 'loading')
+  const voices = useKoharuStore((state) => state.preferences?.speech.voices)
+  const layers = usePage().data?.layers
+  const cast = useMemo(() => castMembers(voices ?? [], layers ?? []), [voices, layers])
+
+  useEffect(() => {
+    setCharacter(savedCharacter)
+  }, [savedCharacter])
+
+  // A rejected edit restores the stored character and remounts the textarea.
+  const [rejected, setRejected] = useState(0)
+  const save = (script: string | null, nextCharacter: string) =>
+    void call(commands.setDialogue, layer.id, script, nextCharacter.trim() || null)
+      .then(() => refresh(projectKey, pageKey))
+      .catch(() => {
+        setCharacter(savedCharacter)
+        setRejected((count) => count + 1)
+      })
+
+  const commitCharacter = (next = character) => {
+    setCharacter(next)
+    if (next.trim() === savedCharacter) return
+    save(dialogue?.script ?? translation, next)
+  }
+
+  return (
+    <InspectorField label={t('inspector.dialogue')}>
+      <div className='flex min-w-0 items-center gap-1'>
+        <Input
+          data-testid={`edit-character-${layer.id}`}
+          aria-label={t('layers.characterLabel', { name })}
+          placeholder={t('inspector.character')}
+          disabled={!translation}
+          className='h-5 min-w-0 flex-1 rounded-md px-1.5 text-[11px] md:text-[11px]'
+          value={character}
+          onChange={(event) => setCharacter(event.currentTarget.value)}
+          onBlur={() => commitCharacter()}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') event.currentTarget.blur()
+          }}
+        />
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            disabled={!translation}
+            aria-label={t('inspector.chooseCharacter', { name })}
+            data-testid={`choose-character-${layer.id}`}
+            className='grid size-5 shrink-0 place-items-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:bg-muted disabled:pointer-events-none disabled:opacity-40'
+          >
+            <ChevronDown className='size-3' />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align='end'
+            className='w-40 min-w-40 border border-border/50 p-0.5 shadow-sm ring-0'
+          >
+            <DropdownMenuRadioGroup
+              value={savedCharacter.toLowerCase()}
+              onValueChange={(value) =>
+                commitCharacter(
+                  cast.find((member) => member.name.toLowerCase() === value)?.name ?? '',
+                )
+              }
+            >
+              <DropdownMenuRadioItem value='' closeOnClick className='min-h-6 py-0.5 text-[10px]'>
+                {t('inspector.noCharacter')}
+              </DropdownMenuRadioItem>
+              {cast.map((member) => (
+                <DropdownMenuRadioItem
+                  key={member.name}
+                  value={member.name.toLowerCase()}
+                  closeOnClick
+                  className='min-h-6 gap-1 py-0.5 text-[10px]'
+                >
+                  <span className='min-w-0 flex-1 truncate'>{member.name}</span>
+                  {member.voiced && (
+                    <Mic
+                      role='img'
+                      aria-label={t('inspector.clonedVoice')}
+                      className='size-3 shrink-0 text-muted-foreground'
+                    />
+                  )}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <SpeechButton layer={layer.id} disabled={!translation} />
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type='button'
+                variant='ghost'
+                size='icon-xs'
+                aria-label={t('speech.regenerate')}
+                disabled={!translation || voicing}
+                className='size-5 rounded-md text-muted-foreground hover:text-foreground'
+                onClick={() => void playSpeech(layer.id, true)}
+              />
+            }
+          >
+            <RefreshCw className='size-3' />
+          </TooltipTrigger>
+          <TooltipContent side='left'>{t('speech.regenerate')}</TooltipContent>
+        </Tooltip>
+      </div>
+      <CommitTextarea
+        key={rejected}
+        data-testid={`edit-dialogue-${layer.id}`}
+        aria-label={t('layers.dialogueLabel', { name })}
+        wrap='soft'
+        delay={null}
+        disabled={!translation}
+        className='max-h-16 min-h-9 w-full max-w-full min-w-0 resize-y overflow-y-auto rounded-md bg-background px-1.5 py-1 text-[12px] leading-4 md:text-[12px]'
+        value={dialogue?.script ?? translation}
+        // An emptied script keeps the character by falling back to the plain translation.
+        onCommit={(script) =>
+          save(script.trim() ? script : character.trim() ? translation : null, character)
+        }
+      />
+    </InspectorField>
   )
 }
 

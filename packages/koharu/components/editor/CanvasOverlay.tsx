@@ -3,6 +3,7 @@
 import { useMemo, useRef } from 'react'
 
 import { SelectionControls } from '@/components/editor/SelectionControls'
+import { SpeechButton } from '@/components/editor/SpeechButton'
 import { effectiveLayerVisibility, expandLayerSelection, isTextLayer } from '@/lib/document'
 import { controlFrame, cssFrame, selectableLayer, type Camera } from '@/lib/geometry'
 import type {
@@ -74,70 +75,85 @@ export function CanvasOverlay({
     ? undefined
     : layers.find(({ layer }) => selectedIds.has(layer.id) && selectableLayer(layer))
   const scale = camera.zoom / window.devicePixelRatio
+  const speechFrame =
+    selectionControl && selectedTextLayer?.content.translation?.text
+      ? cssFrame(selectionControl.frame, camera)
+      : null
 
   return (
-    <div
-      ref={root}
-      data-testid='canvas-overlay'
-      className='pointer-events-none absolute inset-0 overflow-hidden'
-      aria-hidden
-    >
-      {automaticRegion && (
-        <AutomaticRegionOverlay geometry={automaticRegion.geometry} camera={camera} />
-      )}
-      {layers.map(({ layer, frame, opacity }) => {
-        const position = cssFrame(frame, camera)
-        const selected = selectedIds.has(layer.id) && selectableLayer(layer)
-        const highlighted = !selected && hovered === layer.id
-        return (
+    <>
+      <div
+        ref={root}
+        data-testid='canvas-overlay'
+        className='pointer-events-none absolute inset-0 overflow-hidden'
+        aria-hidden
+      >
+        {automaticRegion && (
+          <AutomaticRegionOverlay geometry={automaticRegion.geometry} camera={camera} />
+        )}
+        {layers.map(({ layer, frame, opacity }) => {
+          const position = cssFrame(frame, camera)
+          const selected = selectedIds.has(layer.id) && selectableLayer(layer)
+          const highlighted = !selected && hovered === layer.id
+          return (
+            <div
+              key={layer.id}
+              data-element={layer.id}
+              className='absolute box-border bg-transparent'
+              style={{
+                left: position.left,
+                top: position.top,
+                width: position.width,
+                height: position.height,
+                transform: `rotate(${position.angle}deg)`,
+                transformOrigin: '50% 50%',
+                border:
+                  highlighted || (selected && multipleSelected)
+                    ? '1px solid var(--canvas-selection)'
+                    : undefined,
+                opacity,
+                willChange: selected ? 'left, top, width, height, transform' : undefined,
+              }}
+            />
+          )
+        })}
+
+        {draft && <DraftOverlay frame={draft} camera={camera} />}
+        {showBrushCursor && cursor && (
           <div
-            key={layer.id}
-            data-element={layer.id}
-            className='absolute box-border bg-transparent'
+            className='absolute rounded-full border border-white/95 shadow-[0_0_0_1px_rgb(0_0_0/0.9),0_1px_3px_rgb(0_0_0/0.45)]'
             style={{
-              left: position.left,
-              top: position.top,
-              width: position.width,
-              height: position.height,
-              transform: `rotate(${position.angle}deg)`,
-              transformOrigin: '50% 50%',
-              border:
-                highlighted || (selected && multipleSelected)
-                  ? '1px solid var(--canvas-selection)'
-                  : undefined,
-              opacity,
-              willChange: selected ? 'left, top, width, height, transform' : undefined,
+              left: cursor.x / window.devicePixelRatio - (brushSize * scale) / 2,
+              top: cursor.y / window.devicePixelRatio - (brushSize * scale) / 2,
+              width: brushSize * scale,
+              height: brushSize * scale,
             }}
           />
-        )
-      })}
+        )}
 
-      {draft && <DraftOverlay frame={draft} camera={camera} />}
-      {showBrushCursor && cursor && (
+        {selectionControl && (
+          <SelectionControls
+            container={root}
+            element={selectionControl.layer.id}
+            frame={selectionControl.frame}
+            camera={camera}
+            edgesOnly={Boolean(selectedTextLayer)}
+            onTransformStart={onTransformStart}
+            onTransformFrame={onTransformFrame}
+            onTransformEnd={onTransformEnd}
+          />
+        )}
+      </div>
+      {speechFrame && selectedTextLayer && (
         <div
-          className='absolute rounded-full border border-white/95 shadow-[0_0_0_1px_rgb(0_0_0/0.9),0_1px_3px_rgb(0_0_0/0.45)]'
-          style={{
-            left: cursor.x / window.devicePixelRatio - (brushSize * scale) / 2,
-            top: cursor.y / window.devicePixelRatio - (brushSize * scale) / 2,
-            width: brushSize * scale,
-            height: brushSize * scale,
-          }}
-        />
+          data-canvas-control
+          className='absolute z-10 rounded-md bg-popover/95 shadow-sm ring-1 ring-border'
+          style={{ left: speechFrame.left + speechFrame.width + 6, top: speechFrame.top - 2 }}
+        >
+          <SpeechButton layer={selectedTextLayer.id} className='size-6' />
+        </div>
       )}
-
-      {selectionControl && (
-        <SelectionControls
-          container={root}
-          element={selectionControl.layer.id}
-          frame={selectionControl.frame}
-          camera={camera}
-          edgesOnly={Boolean(selectedTextLayer)}
-          onTransformStart={onTransformStart}
-          onTransformFrame={onTransformFrame}
-          onTransformEnd={onTransformEnd}
-        />
-      )}
-    </div>
+    </>
   )
 }
 

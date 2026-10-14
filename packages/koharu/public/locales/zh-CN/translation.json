@@ -169,10 +169,14 @@
     "border": "描边",
     "borderColor": "描边颜色",
     "borderWidth": "描边宽度",
+    "character": "角色",
+    "chooseCharacter": "选择 {{name}} 的配音角色",
     "chooseFontSize": "选择字体大小",
+    "clonedVoice": "克隆声音",
     "color": "颜色",
     "customFrame": "自定义框架",
     "decreaseBorderWidth": "减小描边宽度",
+    "dialogue": "台词",
     "direction": "方向",
     "font": "字体",
     "fontSize": "字体大小",
@@ -185,6 +189,7 @@
     "fontWeight": "字体粗细",
     "horizontal": "横排",
     "increaseBorderWidth": "增大描边宽度",
+    "noCharacter": "无角色",
     "opacity": "不透明度",
     "placement": "位置",
     "resetAutoFit": "重置为自动适配",
@@ -213,7 +218,9 @@
     "zh-TW": "繁體中文"
   },
   "layers": {
+    "characterLabel": "{{name}} 的角色",
     "delete": "删除 {{name}}",
+    "dialogueLabel": "{{name}} 的台词",
     "edit": "编辑 {{name}}",
     "empty": "此页面上没有图层。",
     "hide": "隐藏 {{name}}",
@@ -308,12 +315,14 @@
   },
   "phase": {
     "detection": "检测",
+    "dialogue": "台词演绎",
     "inpainting": "修补",
     "ocr": "OCR",
     "translation": "翻译"
   },
   "phaseDescription": {
     "detection": "定位页面上的文本。",
+    "dialogue": "添加 [sighs] 等语音提示，并标注每位说话人。",
     "inpainting": "重建移除文字后的画面。",
     "ocr": "读取每个区域中的文本。",
     "translation": "将原文翻译为目标语言。"
@@ -423,11 +432,48 @@
       "title": "快捷键",
       "tools": "工具"
     },
+    "speech": {
+      "addVoice": "添加声音",
+      "character": "角色",
+      "cpuExpertLayers": "CPU 专家层",
+      "cpuExpertLayersDescription": "保留在系统内存中的专家层数量。留空则按显存选择；显存不足时请调高。",
+      "description": "在 GPU 上为译后台词配音。",
+      "direction": "台词演绎",
+      "directionDescription": "台词阶段使用翻译模型添加提示并标注说话人。",
+      "download": "下载（{{size}} GB）",
+      "downloading": "正在下载…",
+      "frames": "帧数",
+      "installed": "已安装",
+      "instructions": "说明",
+      "instructionsPlaceholder": "例如：提示要克制；美香说话很轻。",
+      "layers": "层数",
+      "maxTokens": "单句长度上限",
+      "maxTokensDescription": "每句台词的最大音频帧数，约每秒 21 帧。",
+      "model": "本地模型文件",
+      "modelDescription": "可选，替代托管下载的 Drama 3 GGUF 文件。",
+      "modelLocal": "正在使用下方的本地模型文件。",
+      "modelMissing": "尚未下载 Drama 3",
+      "modelReady": "Drama 3 已就绪",
+      "referenceAudio": "参考 WAV 路径",
+      "referenceText": "参考文本",
+      "removeVoice": "移除 {{character}} 的声音",
+      "runtime": "语音运行时",
+      "runtimeDescription": "语音服务器按需启动，并在应用退出时停止。",
+      "server": "本地服务器",
+      "serverDescription": "可选，替代托管版本的 audiocpp_server 可执行文件。",
+      "threads": "CPU 线程",
+      "title": "语音",
+      "voiceModel": "语音模型",
+      "voiceModelDescription": "Fish Audio Drama 3。需要支持 CUDA 的 NVIDIA GPU。",
+      "voices": "角色声音",
+      "voicesDescription": "用一段简短的 WAV 录音及其准确文本，让角色保持一致的声音。"
+    },
     "tabs": {
       "appearance": "外观",
       "pipeline": "流水线",
       "providers": "提供商",
       "shortcuts": "快捷键",
+      "speech": "语音",
       "translation": "译文",
       "typesetting": "排版"
     },
@@ -462,6 +508,12 @@
       "removeFamily": "删除 {{family}}",
       "title": "排版"
     }
+  },
+  "speech": {
+    "play": "播放台词",
+    "regenerate": "重新生成语音",
+    "stop": "停止台词",
+    "voicing": "正在生成语音…"
   },
   "start": {
     "create": "创建",

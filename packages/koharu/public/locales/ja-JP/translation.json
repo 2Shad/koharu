@@ -169,10 +169,14 @@
     "border": "縁取り",
     "borderColor": "縁取りの色",
     "borderWidth": "縁取り幅",
+    "character": "キャラクター",
+    "chooseCharacter": "{{name}} の話者を選択",
     "chooseFontSize": "フォントサイズを選択",
+    "clonedVoice": "クローン音声",
     "color": "色",
     "customFrame": "カスタムフレーム",
     "decreaseBorderWidth": "縁取り幅を縮小",
+    "dialogue": "セリフ",
     "direction": "方向",
     "font": "フォント",
     "fontSize": "フォントサイズ",
@@ -185,6 +189,7 @@
     "fontWeight": "フォントの太さ",
     "horizontal": "横書き",
     "increaseBorderWidth": "縁取り幅を拡大",
+    "noCharacter": "キャラクターなし",
     "opacity": "不透明度",
     "placement": "配置",
     "resetAutoFit": "自動調整に戻す",
@@ -213,7 +218,9 @@
     "zh-TW": "繁體中文"
   },
   "layers": {
+    "characterLabel": "{{name}} のキャラクター",
     "delete": "{{name}}を削除",
+    "dialogueLabel": "{{name}} のセリフ",
     "edit": "{{name}}を編集",
     "empty": "このページにはレイヤーがありません。",
     "hide": "{{name}}を隠す",
@@ -308,12 +315,14 @@
   },
   "phase": {
     "detection": "検出",
+    "dialogue": "セリフ演出",
     "inpainting": "インペイント",
     "ocr": "OCR",
     "translation": "翻訳"
   },
   "phaseDescription": {
     "detection": "ページ上のテキストを見つけます。",
+    "dialogue": "[sighs] のような演技タグを加え、話者を割り当てます。",
     "inpainting": "文字を消した部分の絵を復元します。",
     "ocr": "各領域内の原文を読み取ります。",
     "translation": "原文を対象言語に翻訳します。"
@@ -423,11 +432,48 @@
       "title": "ショートカット",
       "tools": "ツール"
     },
+    "speech": {
+      "addVoice": "声を追加",
+      "character": "キャラクター",
+      "cpuExpertLayers": "CPU エキスパート層",
+      "cpuExpertLayersDescription": "システム RAM に置くエキスパート層の数です。空欄なら GPU メモリから自動で選びます。GPU メモリが不足する場合は増やしてください。",
+      "description": "翻訳したセリフに GPU で声を付けます。",
+      "direction": "セリフ演出",
+      "directionDescription": "セリフ演出ステージは翻訳モデルを使って演技タグと話者を付けます。",
+      "download": "ダウンロード（{{size}} GB）",
+      "downloading": "ダウンロード中…",
+      "frames": "フレーム",
+      "installed": "インストール済み",
+      "instructions": "指示",
+      "instructionsPlaceholder": "例: タグは控えめに。ミカは小声で話す。",
+      "layers": "層",
+      "maxTokens": "1 行の長さ上限",
+      "maxTokensDescription": "1 行あたりの最大音声フレーム数（約 21 フレーム/秒）。",
+      "model": "ローカルのモデルファイル",
+      "modelDescription": "管理されたダウンロードの代わりに使う Drama 3 GGUF ファイル（任意）。",
+      "modelLocal": "下のローカルのモデルファイルを使用しています。",
+      "modelMissing": "Drama 3 は未ダウンロードです",
+      "modelReady": "Drama 3 の準備ができています",
+      "referenceAudio": "参照 WAV のパス",
+      "referenceText": "参照音声の書き起こし",
+      "removeVoice": "{{character}} の声を削除",
+      "runtime": "音声ランタイム",
+      "runtimeDescription": "音声サーバーは必要なときに起動し、アプリの終了とともに停止します。",
+      "server": "ローカルのサーバー",
+      "serverDescription": "管理されたものの代わりに使う audiocpp_server 実行ファイル（任意）。",
+      "threads": "CPU スレッド",
+      "title": "音声",
+      "voiceModel": "音声モデル",
+      "voiceModelDescription": "Fish Audio Drama 3。CUDA 対応の NVIDIA GPU が必要です。",
+      "voices": "キャラクターの声",
+      "voicesDescription": "短い WAV 録音と正確な書き起こしで、キャラクターの声を一定に保ちます。"
+    },
     "tabs": {
       "appearance": "外観",
       "pipeline": "パイプライン",
       "providers": "プロバイダー",
       "shortcuts": "ショートカット",
+      "speech": "音声",
       "translation": "翻訳",
       "typesetting": "組版"
     },
@@ -462,6 +508,12 @@
       "removeFamily": "{{family}}を削除",
       "title": "組版"
     }
+  },
+  "speech": {
+    "play": "セリフを再生",
+    "regenerate": "音声を再生成",
+    "stop": "セリフを停止",
+    "voicing": "音声を生成中…"
   },
   "start": {
     "create": "作成",

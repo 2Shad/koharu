@@ -146,7 +146,12 @@ function RuntimeSelector({
         model: next,
       },
     }
-    void savePreferences(pipeline, preferences.providers, preferences.typesetting)
+    void savePreferences(
+      pipeline,
+      preferences.providers,
+      preferences.typesetting,
+      preferences.speech,
+    )
       .then((saved) => {
         receivePreferences(saved)
       })
@@ -170,7 +175,12 @@ function RuntimeSelector({
         instructions: draft.instructions || null,
       },
     }
-    void savePreferences(pipeline, preferences.providers, preferences.typesetting)
+    void savePreferences(
+      pipeline,
+      preferences.providers,
+      preferences.typesetting,
+      preferences.speech,
+    )
       .then((saved) => {
         receivePreferences(saved)
       })
@@ -319,6 +329,13 @@ function RuntimeSelector({
               label={t('phase.translation')}
               detail={t('phaseDescription.translation')}
               selected={stages.includes('translation')}
+              onSelect={toggleStage}
+            />
+            <SelectorOption
+              value='dialogue'
+              label={t('phase.dialogue')}
+              detail={t('phaseDescription.dialogue')}
+              selected={stages.includes('dialogue')}
               onSelect={toggleStage}
             />
             <SelectorOption

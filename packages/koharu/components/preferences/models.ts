@@ -7,7 +7,7 @@ import type {
 } from '@koharu/bridge/protocol'
 
 export type PipelineModel = DetectionModel | OcrModel | InpaintingModel
-export type ModelStage = Exclude<Stage, 'translation'>
+export type ModelStage = Exclude<Stage, 'translation' | 'dialogue'>
 export type ModelName = PipelineModel['model']
 
 export const modelOptions = {
