@@ -5062,6 +5062,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "koharu-speech"
+version = "0.83.5"
+dependencies = [
+ "anyhow",
+ "clap",
+ "indoc",
+ "koharu-config",
+ "koharu-runtime",
+ "libc",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "specta",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "windows 0.62.2",
+]
+
+[[package]]
 name = "koharu-storage"
 version = "0.83.5"
 dependencies = [

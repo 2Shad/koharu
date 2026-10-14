@@ -1,0 +1,38 @@
+[package]
+name = "koharu-speech"
+version.workspace = true
+edition.workspace = true
+description = "Character voices and dialogue direction for Koharu."
+license.workspace = true
+authors.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+keywords.workspace = true
+publish.workspace = true
+
+[dependencies]
+koharu-config = { workspace = true }
+koharu-runtime = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+indoc = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+specta = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { workspace = true }

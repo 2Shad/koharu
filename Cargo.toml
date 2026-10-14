@@ -41,6 +41,7 @@ koharu-renderer = { path = "crates/koharu-renderer" }
 koharu-rasterizer = { path = "crates/koharu-rasterizer", default-features = false }
 koharu-desktop = { path = "crates/koharu-desktop" }
 koharu-secrets = { path = "crates/koharu-secrets" }
+koharu-speech = { path = "crates/koharu-speech" }
 
 # external dependencies
 alphanumeric-sort = "1.5.8"
