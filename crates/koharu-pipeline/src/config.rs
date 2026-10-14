@@ -10,6 +10,7 @@ pub struct PipelineConfig {
     pub detection: DetectionModel,
     pub ocr: OcrModel,
     pub translation: TranslationConfig,
+    pub dialogue: DialogueConfig,
     pub inpainting: InpaintingModel,
     /// Settings for every model are kept independently of the active model.
     /// The active stage fields above only select which profile is used.
@@ -22,6 +23,7 @@ struct PipelineFile {
     detection: ModelSelection,
     ocr: ModelSelection,
     translation: TranslationConfig,
+    dialogue: DialogueConfig,
     inpainting: ModelSelection,
     #[serde(default)]
     processor: ProcessorConfig,
@@ -37,6 +39,7 @@ impl Default for PipelineFile {
                 model: "paddleocr-vl-1.6".to_owned(),
             },
             translation: TranslationConfig::default(),
+            dialogue: DialogueConfig::default(),
             inpainting: ModelSelection {
                 model: "lama".to_owned(),
             },
@@ -93,6 +96,7 @@ impl Serialize for PipelineConfig {
                 model: ocr.to_owned(),
             },
             translation: self.translation.clone(),
+            dialogue: self.dialogue.clone(),
             inpainting: ModelSelection {
                 model: inpainting.to_owned(),
             },
@@ -151,6 +155,7 @@ impl<'de> Deserialize<'de> for PipelineConfig {
             detection,
             ocr,
             translation: file.translation,
+            dialogue: file.dialogue,
             inpainting,
             processor: file.processor,
         })
@@ -165,6 +170,7 @@ impl Default for PipelineConfig {
             ),
             ocr: OcrModel::PaddleOcrVl1_6,
             translation: TranslationConfig::default(),
+            dialogue: DialogueConfig::default(),
             inpainting: InpaintingModel::LaMa {},
             processor: ProcessorConfig::default(),
         }
@@ -189,6 +195,15 @@ impl Default for TranslationConfig {
             instructions: None,
         }
     }
+}
+
+/// Unset `model` and `generation` fall back to the translation stage's.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, Type)]
+#[serde(default)]
+pub struct DialogueConfig {
+    pub model: Option<koharu_translator::ModelSelection>,
+    pub generation: Option<GenerationConfig>,
+    pub instructions: Option<String>,
 }
 
 impl PipelineConfig {
@@ -437,6 +452,7 @@ mod tests {
             }),
             ocr: OcrModel::PaddleOcrVl1_6,
             translation: TranslationConfig::default(),
+            dialogue: DialogueConfig::default(),
             inpainting: InpaintingModel::Flux2Klein(Flux2KleinConfig {
                 prompt: "Keep the line art.".to_owned(),
             }),

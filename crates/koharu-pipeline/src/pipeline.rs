@@ -72,6 +72,13 @@ impl Pipeline {
         self.resources.subscribe()
     }
 
+    /// Waits for the running job, then drops all resident stage models;
+    /// stages reload on demand.
+    pub async fn unload_models(&self) {
+        let _execution = self.execution.lock().await;
+        self.current.load().unload_models();
+    }
+
     #[tracing::instrument(skip_all)]
     pub async fn execute(
         &self,

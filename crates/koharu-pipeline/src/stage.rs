@@ -23,14 +23,25 @@ pub enum Stage {
     Detection,
     Ocr,
     Translation,
+    Dialogue,
     Inpainting,
 }
 
 impl Stage {
-    pub const ALL: [Self; 4] = [
+    /// Translation and dialogue share one LLM: they never run concurrently, and
+    /// memory recovery for one must not unload the other.
+    pub(crate) const fn lane(self) -> Self {
+        match self {
+            Self::Dialogue => Self::Translation,
+            stage => stage,
+        }
+    }
+
+    pub const ALL: [Self; 5] = [
         Self::Detection,
         Self::Ocr,
         Self::Translation,
+        Self::Dialogue,
         Self::Inpainting,
     ];
 }

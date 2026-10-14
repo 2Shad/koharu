@@ -119,6 +119,19 @@ fn operations_expand_to_the_supported_workflows() {
     );
     assert_eq!(
         Operation::Through {
+            stage: Stage::Dialogue,
+        }
+        .stages()
+        .unwrap(),
+        vec![
+            Stage::Detection,
+            Stage::Ocr,
+            Stage::Translation,
+            Stage::Dialogue,
+        ],
+    );
+    assert_eq!(
+        Operation::Through {
             stage: Stage::Inpainting,
         }
         .stages()

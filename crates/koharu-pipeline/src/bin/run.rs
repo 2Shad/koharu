@@ -10,9 +10,9 @@ use anyhow::{Context as _, Result};
 use clap::{Parser, ValueEnum};
 use koharu_config::Config;
 use koharu_pipeline::{
-    Committer, DetectionModel, Flux2KleinConfig, InpaintingModel, KoharuLayoutRFDetrSeg2XLConfig,
-    OcrModel, Operation, Pipeline, PipelineConfig, Progress, Request, RoremMixedConfig, Scope,
-    StageOutput, TranslationConfig,
+    Committer, DetectionModel, DialogueConfig, Flux2KleinConfig, InpaintingModel,
+    KoharuLayoutRFDetrSeg2XLConfig, OcrModel, Operation, Pipeline, PipelineConfig, Progress,
+    Request, RoremMixedConfig, Scope, StageOutput, TranslationConfig,
 };
 use koharu_rasterizer::{RasterOptions, Rasterizer};
 use koharu_renderer::Renderer;
@@ -117,6 +117,7 @@ impl Arguments {
                 target_language: self.target_language,
                 instructions: self.translation_instructions.clone(),
             },
+            dialogue: DialogueConfig::default(),
             inpainting: match self.inpainting {
                 InpaintingChoice::LaMa => InpaintingModel::LaMa {},
                 InpaintingChoice::AotInpainting => InpaintingModel::AotInpainting {},

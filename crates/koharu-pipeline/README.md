@@ -1,6 +1,6 @@
 # koharu-pipeline
 
-`koharu-pipeline` coordinates detection, OCR, translation, and inpainting over a
+`koharu-pipeline` coordinates detection, OCR, translation, dialogue, and inpainting over a
 `koharu_scene` project. It owns model lifetime and scheduling; the caller owns
 durability through the `Committer` trait.
 
@@ -68,9 +68,11 @@ layer remain independently editable entities.
 The workflow is small and explicit:
 
 ```text
-detection -> OCR -> translation
+detection -> OCR -> translation -> dialogue
          \-> inpainting
 ```
+
+Translation and dialogue share one LLM lane: they never run concurrently.
 
 There is no runtime graph or graph library. `Operation` selects a subset of
 this workflow:
@@ -149,7 +151,7 @@ lifecycle contract:
 
 - identify its model;
 - load lazily;
-- unload during explicit memory-pressure recovery;
+- unload during memory-pressure recovery or `Pipeline::unload_models`;
 - process exactly one page and produce a semantic `Patch`.
 
 `StageInput` carries one page ID plus optional entity and region filters for
@@ -190,7 +192,7 @@ src/
   scope.rs        validated project/page/region/entity scope
   stage.rs        stable stage identifiers
   stage_runner.rs model loading, processing, progress, and retry classification
-  stages/         detection, OCR, translation, and inpainting processors
+  stages/         detection, OCR, translation, dialogue, and inpainting processors
 ```
 
 ## Validation

@@ -88,10 +88,7 @@ impl Scheduler {
         self.total
     }
 
-    pub(crate) fn start_next(
-        &mut self,
-        busy_stages: &BTreeSet<Stage>,
-    ) -> Option<(EntityId, Stage)> {
+    pub(crate) fn start_next(&mut self, busy_lanes: &BTreeSet<Stage>) -> Option<(EntityId, Stage)> {
         for page_index in self.head..self.pages.len() {
             let started = self.pages[page_index].started();
             if !started && self.active_pages >= self.page_window {
@@ -104,7 +101,7 @@ impl Scheduler {
                     .enumerate()
                     .find_map(|(index, work)| {
                         (work.state == WorkState::Pending
-                            && !busy_stages.contains(&work.stage)
+                            && !busy_lanes.contains(&work.stage.lane())
                             && self.pages[page_index].ready(index))
                         .then_some(index)
                     });
@@ -147,6 +144,7 @@ const fn prerequisite(stage: Stage) -> Option<Stage> {
         Stage::Detection => None,
         Stage::Ocr | Stage::Inpainting => Some(Stage::Detection),
         Stage::Translation => Some(Stage::Ocr),
+        Stage::Dialogue => Some(Stage::Translation),
     }
 }
 

@@ -30,7 +30,7 @@ pub(crate) struct Execution<'a> {
     scheduler: Scheduler,
     scene: Snapshot,
     images: BTreeMap<EntityId, Arc<ImageCache>>,
-    busy_stages: BTreeSet<Stage>,
+    busy_lanes: BTreeSet<Stage>,
     completed: usize,
     failure: Option<PipelineError>,
     base: koharu_scene::Revision,
@@ -82,7 +82,7 @@ impl<'a> Execution<'a> {
             scheduler: Scheduler::new(&pages, &stages),
             scene: snapshot,
             images: BTreeMap::new(),
-            busy_stages: BTreeSet::new(),
+            busy_lanes: BTreeSet::new(),
             completed: 0,
             failure: None,
             base,
@@ -109,7 +109,7 @@ impl<'a> Execution<'a> {
             let Some(completion) = running.next().await else {
                 break;
             };
-            self.busy_stages.remove(&completion.stage);
+            self.busy_lanes.remove(&completion.stage.lane());
             if self.stopped() || self.failure.is_some() {
                 continue;
             }
@@ -125,8 +125,8 @@ impl<'a> Execution<'a> {
         if self.stopped() || self.failure.is_some() {
             return None;
         }
-        let (page, stage) = self.scheduler.start_next(&self.busy_stages)?;
-        self.busy_stages.insert(stage);
+        let (page, stage) = self.scheduler.start_next(&self.busy_lanes)?;
+        self.busy_lanes.insert(stage.lane());
         let images = self
             .images
             .entry(page)

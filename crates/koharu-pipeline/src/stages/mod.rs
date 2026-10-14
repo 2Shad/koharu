@@ -1,4 +1,5 @@
 mod detection;
+mod dialogue;
 mod inpainting;
 mod ocr;
 mod translation;
@@ -73,6 +74,7 @@ pub(crate) struct Stages {
     detection: detection::Processor,
     ocr: ocr::Processor,
     translation: translation::Processor,
+    dialogue: dialogue::Processor,
     inpainting: inpainting::Processor,
 }
 
@@ -85,6 +87,11 @@ impl Stages {
         Ok(Self {
             detection: detection::Processor::new(config.detection()?, device.clone()),
             ocr: ocr::Processor::new(config.ocr.clone(), device.clone()),
+            dialogue: dialogue::Processor::new(
+                config.dialogue.clone(),
+                &config.translation,
+                translator.clone(),
+            ),
             translation: translation::Processor::new(config.translation.clone(), translator),
             inpainting: inpainting::Processor::new(config.inpainting()?, device.clone())?,
         })
@@ -95,6 +102,7 @@ impl Stages {
             Stage::Detection => &self.detection,
             Stage::Ocr => &self.ocr,
             Stage::Translation => &self.translation,
+            Stage::Dialogue => &self.dialogue,
             Stage::Inpainting => &self.inpainting,
         }
     }
@@ -165,6 +173,7 @@ mod tests {
             [
                 "koharu-layout-rfdetr-seg-2xl",
                 "paddleocr-vl-1.6",
+                "local",
                 "local",
                 "lama",
             ]
