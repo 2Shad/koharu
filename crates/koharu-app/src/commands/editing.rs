@@ -10,7 +10,7 @@ use super::{
     canvas::{CanvasChannel, Point},
     project::{CurrentProject, Page, Project, Typography},
 };
-async fn synchronize_canvas(
+pub(super) async fn synchronize_canvas(
     desktop: &Desktop,
     commit: &koharu_scene::Commit,
     page: Option<EntityId>,
@@ -162,6 +162,34 @@ pub(crate) async fn set_translation(
         let mut project = project.project.lock().await;
         let project = project.as_mut().context("no project is open")?;
         let commit = project.set_translation(layer, text).await?;
+        project.record_commit(&commit);
+        (commit, project.active_page())
+    };
+    let canvas = synchronize_canvas(&desktop, &commit, page).await?;
+    canvas_channel.channel.publish(canvas);
+    Ok(())
+}
+
+#[tracing::instrument(
+    target = "koharu_metrics",
+    name = "dialogue_edited",
+    skip_all,
+    fields(origin = "user", empty = script.is_none()),
+)]
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn set_dialogue(
+    layer: EntityId,
+    script: Option<String>,
+    character: Option<String>,
+    desktop: State<'_, Desktop>,
+    project: State<'_, CurrentProject>,
+    canvas_channel: State<'_, CanvasChannel>,
+) -> Result<(), Error> {
+    let (commit, page) = {
+        let mut project = project.project.lock().await;
+        let project = project.as_mut().context("no project is open")?;
+        let commit = project.set_dialogue(layer, script, character).await?;
         project.record_commit(&commit);
         (commit, project.active_page())
     };

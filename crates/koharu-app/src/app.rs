@@ -134,6 +134,10 @@ pub fn run(context: tauri::Context<CefRuntime>) -> Result<()> {
             application.manage(ResourceChannel::default());
             application.manage(ProjectChannel::default());
             application.manage(Initialization::default());
+            application.manage(crate::commands::Accelerator::default());
+            application.manage(koharu_speech::Speech::from_config(
+                koharu_speech::SpeechConfig::load()?,
+            )?);
 
             let handle = application.handle().clone();
             application.manage(koharu_desktop::Desktop::new()?);

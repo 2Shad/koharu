@@ -155,11 +155,15 @@ impl KoharuHost {
             progress: None,
             inpainting_mask: None,
         };
-        let result = self
-            .handle
-            .state::<koharu_pipeline::Pipeline>()
-            .execute(snapshot, request, &mut committer)
-            .await;
+        let pipeline = self.handle.state::<koharu_pipeline::Pipeline>();
+        let result = super::super::processing::execute(
+            &self.handle,
+            &pipeline,
+            snapshot,
+            request,
+            &mut committer,
+        )
+        .await;
         watcher.abort();
         self.handle.state::<Processing>().stops.lock().remove(&job);
         let report = result.map_err(|error| anyhow!(error))?;
@@ -656,6 +660,7 @@ enum AgentPipelineOperation {
     Detection,
     Ocr,
     Translation,
+    Dialogue,
     Inpainting,
 }
 
@@ -669,6 +674,9 @@ impl From<AgentPipelineOperation> for Operation {
             AgentPipelineOperation::Ocr => Self::Only { stage: Stage::Ocr },
             AgentPipelineOperation::Translation => Self::Only {
                 stage: Stage::Translation,
+            },
+            AgentPipelineOperation::Dialogue => Self::Only {
+                stage: Stage::Dialogue,
             },
             AgentPipelineOperation::Inpainting => Self::Only {
                 stage: Stage::Inpainting,

@@ -4,12 +4,13 @@ use anyhow::{Context as _, Result, anyhow, bail};
 use image::{DynamicImage, ImageFormat, RgbaImage};
 use koharu_desktop::Frame;
 use koharu_scene::{
-    AssetInput, AssetMetadata, AssetRole, At, Authored, Commit, EntityId, EntityOrigin,
-    Geometry as SceneGeometry, Group as SceneGroup, Origin, PageDraft, Point as ScenePoint,
-    Presents, RasterLayer as SceneRasterLayer, RasterLayerKind, Region as SceneRegion,
-    RemovePolicy, Revision, Session, Snapshot, SourceText as SceneSourceText,
-    TextGroup as SceneTextGroup, TextLayout as SceneTextLayout, TextLayoutKind,
-    Translation as SceneTranslation, Typography as SceneTypography, Visibility as SceneVisibility,
+    AssetInput, AssetMetadata, AssetRole, At, Authored, Commit, Dialogue as SceneDialogue,
+    EntityId, EntityOrigin, Geometry as SceneGeometry, Group as SceneGroup, Origin, PageDraft,
+    Point as ScenePoint, Presents, RasterLayer as SceneRasterLayer, RasterLayerKind,
+    Region as SceneRegion, RemovePolicy, Revision, Session, Snapshot,
+    SourceText as SceneSourceText, TextGroup as SceneTextGroup, TextLayout as SceneTextLayout,
+    TextLayoutKind, Translation as SceneTranslation, Typography as SceneTypography,
+    Visibility as SceneVisibility,
 };
 use serde::Serialize;
 use specta::Type;
@@ -121,6 +122,7 @@ pub struct TextContent {
     pub id: EntityId,
     pub source: Option<SourceText>,
     pub translation: Option<Translation>,
+    pub dialogue: Option<Dialogue>,
     pub role: Option<String>,
     pub source_region: Option<EntityId>,
 }
@@ -156,6 +158,50 @@ pub struct Translation {
     pub text: String,
     pub language: Option<String>,
 }
+
+#[derive(Clone, Debug, Serialize, Type)]
+pub struct Dialogue {
+    pub script: String,
+    pub character: Option<String>,
+}
+
+/// Dialogue script, or the translation when there is no current dialogue.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct SpokenLine {
+    pub(crate) content: EntityId,
+    pub(crate) script: String,
+    pub(crate) character: Option<String>,
+}
+
+impl SpokenLine {
+    fn new(content: EntityId, translation: &str, dialogue: Option<SceneDialogue>) -> Self {
+        match current_dialogue(translation, dialogue) {
+            Some(dialogue) => Self {
+                content,
+                script: dialogue.script.value,
+                character: dialogue.character,
+            },
+            None => Self {
+                content,
+                script: translation.to_owned(),
+                character: None,
+            },
+        }
+    }
+}
+
+/// Drops dialogue whose words no longer match `translation`: pipeline
+/// re-translation cannot remove a direction it does not own.
+fn current_dialogue(translation: &str, dialogue: Option<SceneDialogue>) -> Option<SceneDialogue> {
+    dialogue.filter(|dialogue| {
+        koharu_speech::script::spoken(&dialogue.script.value)
+            == koharu_speech::script::spoken(translation)
+    })
+}
+
+const SPEECH_ROLE: &str = "speech";
+const SPEECH_SCRIPT: &str = "script";
+const SPEECH_CHARACTER: &str = "character";
 
 #[derive(Clone, Debug, serde::Deserialize, Serialize, Type)]
 pub struct Typography {
@@ -506,9 +552,22 @@ impl Project {
         let language = snapshot
             .component::<SceneTranslation>(content)?
             .and_then(|translation| translation.language);
+        // Dialogue must keep the translation's words; drop it when they change.
+        let stale_dialogue =
+            snapshot
+                .component::<SceneDialogue>(content)?
+                .is_some_and(|dialogue| {
+                    text.as_deref().is_none_or(|text| {
+                        koharu_speech::script::spoken(&dialogue.script.value)
+                            != koharu_speech::script::spoken(text)
+                    })
+                });
         let patch = snapshot.patch(|edit| {
             edit.promote_entity_to_user(layer)?;
             edit.promote_entity_to_user(content)?;
+            if stale_dialogue {
+                edit.remove::<SceneDialogue>(content)?;
+            }
             match text {
                 Some(text) => edit.set(
                     content,
@@ -521,6 +580,104 @@ impl Project {
             }
         })?;
         self.commit(patch).await
+    }
+
+    pub(crate) async fn set_dialogue(
+        &mut self,
+        layer: EntityId,
+        script: Option<String>,
+        character: Option<String>,
+    ) -> Result<Commit> {
+        let snapshot = self.snapshot();
+        let content = Self::text_content(&snapshot, layer)?;
+        let script = script.map(|script| koharu_speech::script::sanitize(&script));
+        if let Some(script) = &script {
+            let translation = snapshot
+                .component::<SceneTranslation>(content)?
+                .context("dialogue requires a translation")?;
+            if koharu_speech::script::spoken(script)
+                != koharu_speech::script::spoken(&translation.text.value)
+            {
+                bail!("dialogue may only add [cues]; edit the translation to change its words");
+            }
+        }
+        let patch = snapshot.patch(|edit| {
+            edit.promote_entity_to_user(layer)?;
+            edit.promote_entity_to_user(content)?;
+            match script {
+                Some(script) => edit.set(
+                    content,
+                    &SceneDialogue {
+                        script: Authored::user(script),
+                        character: character
+                            .map(|character| character.trim().to_owned())
+                            .filter(|character| !character.is_empty()),
+                    },
+                ),
+                None => edit.remove::<SceneDialogue>(content),
+            }
+        })?;
+        self.commit(patch).await
+    }
+
+    pub(crate) fn spoken_line(snapshot: &Snapshot, layer: EntityId) -> Result<SpokenLine> {
+        let content = snapshot.text_layer(layer)?.content()?;
+        let translation = content
+            .translation()?
+            .context("text layer has no translation to voice")?;
+        Ok(SpokenLine::new(
+            content.id(),
+            &translation.text.value,
+            content.dialogue()?,
+        ))
+    }
+
+    /// Cached recording keyed by `line`'s script and character.
+    pub(crate) fn speech(
+        snapshot: &Snapshot,
+        line: &SpokenLine,
+    ) -> Result<Option<koharu_scene::Asset>> {
+        Ok(snapshot
+            .asset(line.content, &AssetRole::new(SPEECH_ROLE)?)?
+            .filter(|asset| {
+                let attributes = &asset.metadata.attributes;
+                attributes.get(SPEECH_SCRIPT) == Some(&line.script)
+                    && attributes.get(SPEECH_CHARACTER) == line.character.as_ref()
+            }))
+    }
+
+    /// Returns `None` when the layer's spoken line changed during synthesis.
+    pub(crate) async fn store_speech(
+        &mut self,
+        layer: EntityId,
+        line: &SpokenLine,
+        wav: Vec<u8>,
+    ) -> Result<Option<Commit>> {
+        let snapshot = self.snapshot();
+        if Self::spoken_line(&snapshot, layer).ok().as_ref() != Some(line) {
+            return Ok(None);
+        }
+        let mut attributes = std::collections::BTreeMap::new();
+        attributes.insert(SPEECH_SCRIPT.to_owned(), line.script.clone());
+        if let Some(character) = &line.character {
+            attributes.insert(SPEECH_CHARACTER.to_owned(), character.clone());
+        }
+        let patch = snapshot.patch(|edit| {
+            edit.set_asset(
+                line.content,
+                &AssetRole::new(SPEECH_ROLE)?,
+                AssetInput::new(
+                    wav,
+                    "audio/wav",
+                    AssetMetadata {
+                        width: None,
+                        height: None,
+                        attributes,
+                    },
+                ),
+            )
+        })?;
+        Ok(Some(self.commit(patch).await?))
     }
 
     pub(crate) async fn set_typography(
@@ -1008,7 +1165,16 @@ impl Project {
                 text: source.text.value,
                 language: source.language.map(|language| language.to_string()),
             });
-            let translation = content.translation()?.map(|translation| Translation {
+            let scene_translation = content.translation()?;
+            let dialogue = match &scene_translation {
+                Some(translation) => current_dialogue(&translation.text.value, content.dialogue()?),
+                None => None,
+            }
+            .map(|dialogue| Dialogue {
+                script: dialogue.script.value,
+                character: dialogue.character,
+            });
+            let translation = scene_translation.map(|translation| Translation {
                 text: translation.text.value,
                 language: translation.language.map(|language| language.to_string()),
             });
@@ -1028,6 +1194,7 @@ impl Project {
                     id: content.id(),
                     source,
                     translation,
+                    dialogue,
                     role,
                     source_region,
                 }),

@@ -8,11 +8,25 @@ pub(crate) mod output;
 pub(crate) mod preferences;
 pub(crate) mod processing;
 pub(crate) mod project;
+pub(crate) mod speech;
 
 use parking_lot::Mutex;
 use serde::Serialize;
 use specta::Type;
 use tauri::ipc::{Channel, IpcResponse};
+
+/// Exclusive use of the GPU across processes: the speech server and pipeline
+/// models do not fit together.
+#[derive(Default)]
+pub(crate) struct Accelerator(tokio::sync::Mutex<()>);
+
+impl std::ops::Deref for Accelerator {
+    type Target = tokio::sync::Mutex<()>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 #[derive(Debug, Type)]
 #[specta(transparent)]
@@ -79,6 +93,7 @@ pub fn bindings() -> tauri_specta::Builder<tauri_runtime_cef::CefRuntime> {
             editing::move_page,
             editing::set_source_text,
             editing::set_translation,
+            editing::set_dialogue,
             editing::set_typography,
             editing::set_geometry,
             editing::set_visibility,
@@ -88,6 +103,9 @@ pub fn bindings() -> tauri_specta::Builder<tauri_runtime_cef::CefRuntime> {
             editing::redo,
             processing::process,
             processing::stop_job,
+            speech::speak,
+            speech::get_speech_model,
+            speech::install_speech,
             output::export,
             output::get_thumbnail,
             fonts::get_fonts,

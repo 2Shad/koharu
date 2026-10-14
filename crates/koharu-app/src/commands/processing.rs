@@ -10,7 +10,7 @@ use tauri::{AppHandle, Manager as _, State, ipc::Channel};
 use tauri_runtime_cef::CefRuntime;
 use uuid::Uuid;
 
-use super::{ChannelExt as _, Error, canvas::CanvasChannel, project::CurrentProject};
+use super::{Accelerator, ChannelExt as _, Error, canvas::CanvasChannel, project::CurrentProject};
 use koharu_desktop::Desktop;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, Type)]
@@ -57,6 +57,21 @@ pub enum JobState {
     Finished,
     Failed,
     Stopped,
+}
+
+/// Runs a pipeline job under the accelerator lease, after stopping the speech
+/// server so pipeline models can load.
+pub(crate) async fn execute(
+    handle: &AppHandle<CefRuntime>,
+    pipeline: &koharu_pipeline::Pipeline,
+    snapshot: Snapshot,
+    request: koharu_pipeline::Request,
+    committer: &mut dyn Committer,
+) -> std::result::Result<koharu_pipeline::Report, koharu_pipeline::PipelineError> {
+    let accelerator = handle.state::<Accelerator>();
+    let _lease = accelerator.lock().await;
+    handle.state::<koharu_speech::Speech>().unload().await;
+    pipeline.execute(snapshot, request, committer).await
 }
 
 #[derive(Default)]
@@ -153,7 +168,11 @@ pub(crate) async fn process(
                     model,
                     elapsed,
                 } => {
-                    if stage != koharu_pipeline::Stage::Translation {
+                    // LLM stages report their own model runs from the translator.
+                    if !matches!(
+                        stage,
+                        koharu_pipeline::Stage::Translation | koharu_pipeline::Stage::Dialogue
+                    ) {
                         tracing::info!(
                             target: "koharu_metrics",
                             metric = "model_run",
@@ -235,7 +254,7 @@ pub(crate) async fn process(
         let mut committer = PipelineCommitter {
             handle: task_handle.clone(),
         };
-        let result = pipeline.execute(snapshot, request, &mut committer).await;
+        let result = execute(&task_handle, &pipeline, snapshot, request, &mut committer).await;
         let (stopped, error) = match result {
             Ok(report) => (report.status == RunStatus::Stopped, None),
             Err(error) => {
