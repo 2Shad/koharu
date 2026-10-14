@@ -110,6 +110,16 @@ impl Cuda {
             .split(','))
     }
 
+    /// Installs the package; returns each library's directory.
+    pub(crate) async fn library_directories(self) -> Result<Vec<PathBuf>> {
+        let root = self.install().await?;
+        Ok(self
+            .library_paths(&root)?
+            .into_iter()
+            .filter_map(|library| library.parent().map(Path::to_path_buf))
+            .collect())
+    }
+
     fn library_paths(self, root: &Path) -> Result<Vec<PathBuf>> {
         let names = self.libraries()?.collect::<Vec<_>>();
         let mut paths = vec![None; names.len()];

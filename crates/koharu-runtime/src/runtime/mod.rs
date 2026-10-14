@@ -10,6 +10,8 @@ use crate::{Device, Hardware};
 use graph::{Component, Plan};
 use packages::{Diffusion, Llama};
 
+pub use packages::{Executable, speech_server};
+
 pub use packages::Torch;
 
 mod sealed {

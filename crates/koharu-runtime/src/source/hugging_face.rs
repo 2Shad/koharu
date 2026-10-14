@@ -59,6 +59,13 @@ impl<'a> HuggingFaceFile<'a> {
         self.path().is_file()
     }
 
+    /// Snapshot path if already downloaded.
+    #[must_use]
+    pub fn cached(self) -> Option<PathBuf> {
+        let path = self.path();
+        path.is_file().then_some(path)
+    }
+
     #[tracing::instrument(skip_all)]
     pub async fn resolve(self) -> anyhow::Result<PathBuf> {
         Store::file(self.path(), move |stage| async move {
