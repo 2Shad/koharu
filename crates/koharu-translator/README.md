@@ -18,3 +18,7 @@ configuration of its translation processor.
 `GenerationConfig`, and `TranslationRequest` for each operation. The engine
 keeps the selected local model resident when possible and reads live provider
 connection settings without owning workflow configuration.
+
+LLM providers implement one structured-output primitive,
+`Translator::complete(Prompt)`; translation is a `Prompt` built on it.
+Machine-translation services keep their native endpoints.

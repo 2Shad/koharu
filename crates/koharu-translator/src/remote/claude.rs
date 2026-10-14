@@ -9,9 +9,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 use super::send_json;
-use crate::{
-    GenerationConfig, Model, Provider, Result, TranslationRequest, backend::encode_image, prompt,
-};
+use crate::{GenerationConfig, Model, Prompt, Provider, Result, completion::encode_image};
 
 const URL: &str = "https://api.anthropic.com/v1/messages";
 const MODELS_URL: &str = "https://api.anthropic.com/v1/models?limit=1000";
@@ -49,20 +47,19 @@ pub(super) async fn models(client: &Client) -> Result<Vec<Model>> {
         .collect())
 }
 
-pub(super) async fn translate(
+pub(super) async fn complete(
     client: &Client,
     _config: &ClaudeConfig,
     model: &str,
     generation: &GenerationConfig,
-    request: &TranslationRequest,
-) -> Result<Vec<String>> {
+    prompt: &Prompt,
+) -> Result<String> {
     let api_key = koharu_secrets::get("claude")?.context("claude API key is not configured")?;
-    let (system, user) = prompt::prompts(request)?;
     let body = Request {
         model,
         max_tokens: generation.max_tokens.unwrap_or(8192),
-        system: &system,
-        messages: [Message::user(&user, request.image.as_deref())?],
+        system: &prompt.system,
+        messages: [Message::user(&prompt.user, prompt.image.as_deref())?],
         temperature: generation.temperature,
         thinking: generation.reasoning.map(|enabled| ThinkingConfig {
             kind: if enabled { "adaptive" } else { "disabled" },
@@ -70,7 +67,7 @@ pub(super) async fn translate(
         output_config: OutputConfig {
             format: JsonOutputFormat {
                 kind: "json_schema",
-                schema: prompt::output_schema(request.segments.len()),
+                schema: prompt.schema.clone(),
             },
         },
     };
@@ -83,12 +80,11 @@ pub(super) async fn translate(
             .json(&body),
     )
     .await?;
-    let text = response
+    Ok(response
         .content
         .into_iter()
         .find_map(|block| (block.kind == "text").then_some(block.text).flatten())
-        .context("Claude returned no text content")?;
-    Ok(prompt::translations("claude", &text, &request.segments)?)
+        .context("Claude returned no text content")?)
 }
 
 #[derive(Serialize)]
@@ -224,6 +220,7 @@ mod tests {
 
     #[test]
     fn serializes_structured_output_with_thinking() {
+        let prompt = crate::completion::test_prompt(None);
         let body = Request {
             model: "claude-opus-4-8",
             max_tokens: 1024,
@@ -234,7 +231,7 @@ mod tests {
             output_config: OutputConfig {
                 format: JsonOutputFormat {
                     kind: "json_schema",
-                    schema: prompt::output_schema(2),
+                    schema: prompt.schema.clone(),
                 },
             },
         };
@@ -242,10 +239,7 @@ mod tests {
 
         assert_eq!(value["thinking"]["type"], "adaptive");
         assert_eq!(value["output_config"]["format"]["type"], "json_schema");
-        assert_eq!(
-            value["output_config"]["format"]["schema"]["properties"]["translations"]["maxItems"],
-            2
-        );
+        assert_eq!(value["output_config"]["format"]["schema"], prompt.schema);
     }
 
     #[test]

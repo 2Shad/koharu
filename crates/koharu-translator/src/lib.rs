@@ -1,6 +1,7 @@
 //! Translation through local and hosted providers.
 
 mod backend;
+mod completion;
 mod error;
 mod language;
 mod local;
@@ -17,6 +18,7 @@ use error::{Error, Result};
 use local::LocalTranslator;
 
 pub use backend::{TranslationContext, TranslationRequest};
+pub use completion::Prompt;
 pub use language::Language;
 pub use model::{GenerationConfig, Model, ModelSelection, Quantization};
 pub(crate) use model::{ModelGeneration, QuantizationDefinition, display_name};
@@ -64,6 +66,14 @@ impl Translator {
     pub fn supports_vision(selection: &ModelSelection, generation: &GenerationConfig) -> bool {
         generation.vision.unwrap_or(false)
             && (selection.provider != Provider::Local || local::supports_vision(selection))
+    }
+
+    #[must_use]
+    pub fn supports_completion(selection: &ModelSelection) -> bool {
+        !matches!(
+            selection.provider,
+            Provider::DeepL | Provider::GoogleCloudTranslation | Provider::Caiyun
+        )
     }
 
     #[must_use]
@@ -129,22 +139,29 @@ impl Translator {
         }
 
         let generation = generation.for_model(selection);
-
-        if Self::supports_vision(selection, &generation) {
-            request.prepare_image()?;
-        } else {
-            request.remove_image();
-        }
-
         let expected = request.segments.len();
-        let translated = if provider == Provider::Local {
-            self.local(selection)
-                .await?
-                .translate(request, generation)
-                .await?
+        let translated = if Self::supports_completion(selection) {
+            if provider == Provider::Local
+                && !self
+                    .local(selection)
+                    .await?
+                    .supports_target_language(request.target_language)
+            {
+                return Err(Error::UnsupportedLanguage {
+                    provider: provider_id,
+                    language: request.target_language,
+                }
+                .into());
+            }
+            if !Self::supports_vision(selection, &generation) {
+                request.image = None;
+            }
+            let prompt = prompt::translation(&request)?;
+            let text = self.completion(selection, generation, prompt).await?;
+            prompt::translations(provider_id, &text, &request.segments)?
         } else {
             let providers = self.providers.read()?.clone();
-            remote::translate(&self.client, &providers, selection, &generation, &request).await?
+            remote::translate(&self.client, &providers, selection, &request).await?
         };
         if translated.len() != expected {
             return Err(Error::SegmentCount {
@@ -156,6 +173,53 @@ impl Translator {
         }
         tracing::Span::current().record("outcome", "completed");
         Ok((provider_id, translated))
+    }
+
+    /// Returns the provider id and raw JSON text. Machine-translation providers
+    /// fail with `CompletionUnsupported`.
+    #[tracing::instrument(
+        target = "koharu_metrics",
+        name = "model_run",
+        skip_all,
+        fields(
+            stage = "completion",
+            prompt = prompt.name,
+            provider = %selection.provider,
+            model = selection.model.as_deref().unwrap_or("provider_default"),
+            outcome = tracing::field::Empty,
+        ),
+    )]
+    pub async fn complete(
+        &self,
+        selection: &ModelSelection,
+        generation: GenerationConfig,
+        prompt: Prompt,
+    ) -> anyhow::Result<(&'static str, String)> {
+        let provider_id: &'static str = selection.provider.into();
+        let text = self
+            .completion(selection, generation.for_model(selection), prompt)
+            .await?;
+        tracing::Span::current().record("outcome", "completed");
+        Ok((provider_id, text))
+    }
+
+    /// `generation` must already be normalized by `for_model`.
+    async fn completion(
+        &self,
+        selection: &ModelSelection,
+        generation: GenerationConfig,
+        mut prompt: Prompt,
+    ) -> Result<String> {
+        prompt.prepare_image(Self::supports_vision(selection, &generation))?;
+        if selection.provider == Provider::Local {
+            self.local(selection)
+                .await?
+                .complete(prompt, generation)
+                .await
+        } else {
+            let providers = self.providers.read()?.clone();
+            remote::complete(&self.client, &providers, selection, &generation, &prompt).await
+        }
     }
 
     #[tracing::instrument(skip_all)]

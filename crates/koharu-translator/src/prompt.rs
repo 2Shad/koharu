@@ -5,9 +5,11 @@ use indoc::indoc;
 use serde::{Deserialize, Deserializer, Serialize, de};
 use serde_json::{Value, json};
 
-use crate::{Language, TranslationContext, TranslationRequest};
+use crate::{Language, Prompt, TranslationContext, TranslationRequest};
 
-pub(crate) fn prompts(request: &TranslationRequest) -> anyhow::Result<(String, String)> {
+/// Callers must drop images the model cannot see first; the system prompt
+/// mentions the image whenever one is present.
+pub(crate) fn translation(request: &TranslationRequest) -> anyhow::Result<Prompt> {
     let input = TranslationInput {
         source_language: request.source_language,
         target_language: request.target_language,
@@ -20,7 +22,13 @@ pub(crate) fn prompts(request: &TranslationRequest) -> anyhow::Result<(String, S
             .collect(),
     };
     let user = serde_json::to_string(&input).context("failed to serialize translation input")?;
-    Ok((translation_system_prompt(request), user))
+    Ok(Prompt {
+        name: "manga_translation",
+        system: translation_system_prompt(request),
+        user,
+        schema: output_schema(request.segments.len()),
+        image: request.image.clone(),
+    })
 }
 
 pub(crate) fn translations(
@@ -80,7 +88,7 @@ pub(crate) fn snippet(text: &str) -> String {
     output
 }
 
-pub(crate) fn output_schema(expected: usize) -> Value {
+fn output_schema(expected: usize) -> Value {
     json!({
         "type": "object",
         "properties": {
@@ -322,8 +330,8 @@ mod tests {
     fn prompt_payload_contains_ordered_context() {
         let request = TranslationRequest::new(["new"], Language::English)
             .with_context([TranslationContext::new("old", "previous")]);
-        let (_, user) = prompts(&request).unwrap();
-        let input: serde_json::Value = serde_json::from_str(&user).unwrap();
+        let prompt = translation(&request).unwrap();
+        let input: serde_json::Value = serde_json::from_str(&prompt.user).unwrap();
         assert_eq!(input["context"][0]["source"], "old");
         assert_eq!(input["context"][0]["translation"], "previous");
         assert_eq!(input["segments"][0]["id"], 0);
@@ -339,6 +347,17 @@ mod tests {
         assert!(prompt.contains("from Japanese into natural Korean"));
         assert!(prompt.contains("Copy every input ID exactly once"));
         assert!(prompt.contains("Use informal speech."));
+    }
+
+    #[test]
+    fn translation_prompt_carries_schema_and_image() {
+        let request = TranslationRequest::new(["one", "two"], Language::English)
+            .with_image(std::sync::Arc::new(image::DynamicImage::new_rgb8(1, 1)));
+        let prompt = translation(&request).unwrap();
+        assert_eq!(prompt.name, "manga_translation");
+        assert_eq!(prompt.schema, output_schema(2));
+        assert!(prompt.image.is_some());
+        assert!(prompt.system.contains("attached original page image"));
     }
 
     #[test]

@@ -8,8 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::send_json;
 use crate::{
-    GenerationConfig, Model, Provider, Result, TranslationRequest, backend::encode_image,
-    display_name, prompt,
+    GenerationConfig, Model, Prompt, Provider, Result, completion::encode_image, display_name,
 };
 
 const RESPONSES_URL: &str = "https://api.x.ai/v1/responses";
@@ -19,23 +18,23 @@ const MODELS_URL: &str = "https://api.x.ai/v1/language-models";
 #[serde(default)]
 pub struct GrokConfig {}
 
-pub(super) async fn translate(
+pub(super) async fn complete(
     client: &Client,
     _config: &GrokConfig,
     model: &str,
     generation: &GenerationConfig,
-    request: &TranslationRequest,
-) -> Result<Vec<String>> {
+    prompt: &Prompt,
+) -> Result<String> {
     let api_key = koharu_secrets::get("grok")?.context("grok API key is not configured")?;
     let response: Response = send_json(
         "grok",
         client
             .post(RESPONSES_URL)
             .bearer_auth(api_key.expose_secret())
-            .json(&request_body(model, generation, request)?),
+            .json(&request_body(model, generation, prompt)?),
     )
     .await?;
-    let text = response
+    Ok(response
         .output
         .into_iter()
         .flat_map(|item| item.content)
@@ -44,8 +43,7 @@ pub(super) async fn translate(
                 .then_some(content.text)
                 .flatten()
         })
-        .context("Grok returned no output text")?;
-    Ok(prompt::translations("grok", &text, &request.segments)?)
+        .context("Grok returned no output text")?)
 }
 
 pub(super) async fn models(client: &Client) -> Result<Vec<Model>> {
@@ -77,24 +75,25 @@ pub(super) async fn models(client: &Client) -> Result<Vec<Model>> {
 fn request_body<'a>(
     model: &'a str,
     generation: &GenerationConfig,
-    request: &TranslationRequest,
+    prompt: &Prompt,
 ) -> anyhow::Result<Request<'a>> {
-    let (system, user) = prompt::prompts(request)?;
-    let user_content = match request.image.as_deref() {
+    let user_content = match prompt.image.as_deref() {
         Some(image) => InputContent::Parts(vec![
-            InputPart::Text { text: user },
+            InputPart::Text {
+                text: prompt.user.clone(),
+            },
             InputPart::Image {
                 image_url: encode_image(image)?.data_url(),
             },
         ]),
-        None => InputContent::Text(user),
+        None => InputContent::Text(prompt.user.clone()),
     };
     Ok(Request {
         model,
         input: [
             InputMessage {
                 role: "system",
-                content: InputContent::Text(system),
+                content: InputContent::Text(prompt.system.clone()),
             },
             InputMessage {
                 role: "user",
@@ -112,9 +111,9 @@ fn request_body<'a>(
         text: TextConfig {
             format: TextFormat {
                 kind: "json_schema",
-                name: "manga_translation",
+                name: prompt.name,
                 strict: true,
-                schema: prompt::output_schema(request.segments.len()),
+                schema: prompt.schema.clone(),
             },
         },
     })
@@ -212,8 +211,7 @@ mod tests {
 
     #[test]
     fn serializes_responses_schema_and_image_input() {
-        let request = TranslationRequest::new(["hello"], crate::Language::Japanese)
-            .with_image(std::sync::Arc::new(image::DynamicImage::new_rgb8(1, 1)));
+        let prompt = crate::completion::test_prompt(Some(image::DynamicImage::new_rgb8(1, 1)));
         let body = request_body(
             "grok-4.5",
             &GenerationConfig {
@@ -221,7 +219,7 @@ mod tests {
                 reasoning: Some(true),
                 ..GenerationConfig::default()
             },
-            &request,
+            &prompt,
         )
         .unwrap();
         let value = serde_json::to_value(body).unwrap();
@@ -230,6 +228,8 @@ mod tests {
         assert_eq!(value["reasoning"]["effort"], "high");
         assert_eq!(value["text"]["format"]["type"], "json_schema");
         assert_eq!(value["text"]["format"]["strict"], true);
+        assert_eq!(value["text"]["format"]["name"], "test_prompt");
+        assert_eq!(value["text"]["format"]["schema"], prompt.schema);
         assert_eq!(value["input"][1]["content"][0]["type"], "input_text");
         assert_eq!(value["input"][1]["content"][1]["type"], "input_image");
         assert!(value["input"][1]["content"][1]["image_url"].is_string());

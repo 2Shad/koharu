@@ -30,17 +30,17 @@ pub use openai_compatible::OpenAiCompatibleConfig;
 pub use openrouter::OpenRouterConfig;
 
 use crate::{
-    Error, GenerationConfig, Model, ModelSelection, Provider, ProvidersConfig, Result,
+    Error, GenerationConfig, Model, ModelSelection, Prompt, Provider, ProvidersConfig, Result,
     TranslationRequest,
 };
 
-pub(crate) async fn translate(
+pub(crate) async fn complete(
     client: &Client,
     providers: &ProvidersConfig,
     selection: &ModelSelection,
     generation: &GenerationConfig,
-    request: &TranslationRequest,
-) -> Result<Vec<String>> {
+    prompt: &Prompt,
+) -> Result<String> {
     let model = || {
         selection
             .model
@@ -49,46 +49,61 @@ pub(crate) async fn translate(
     };
     match selection.provider {
         Provider::OpenAi => {
-            openai::translate(client, &providers.openai, model()?, generation, request).await
+            openai::complete(client, &providers.openai, model()?, generation, prompt).await
         }
         Provider::Gemini => {
-            gemini::translate(client, &providers.gemini, model()?, generation, request).await
+            gemini::complete(client, &providers.gemini, model()?, generation, prompt).await
         }
         Provider::Claude => {
-            claude::translate(client, &providers.claude, model()?, generation, request).await
+            claude::complete(client, &providers.claude, model()?, generation, prompt).await
         }
         Provider::Grok => {
-            grok::translate(client, &providers.grok, model()?, generation, request).await
+            grok::complete(client, &providers.grok, model()?, generation, prompt).await
         }
         Provider::MiniMax => {
-            minimax::translate(client, &providers.minimax, model()?, generation, request).await
+            minimax::complete(client, &providers.minimax, model()?, generation, prompt).await
         }
         Provider::DeepSeek => {
-            deepseek::translate(client, &providers.deepseek, model()?, generation, request).await
+            deepseek::complete(client, &providers.deepseek, model()?, generation, prompt).await
         }
         Provider::OpenAiCompatible => {
-            openai_compatible::translate(
+            openai_compatible::complete(
                 client,
                 &providers.openai_compatible,
                 model()?,
                 generation,
-                request,
+                prompt,
             )
             .await
         }
         Provider::OpenRouter => {
-            openrouter::translate(client, &providers.openrouter, model()?, generation, request)
-                .await
+            openrouter::complete(client, &providers.openrouter, model()?, generation, prompt).await
         }
         Provider::LmStudio => {
-            lm_studio::translate(client, &providers.lm_studio, model()?, generation, request).await
+            lm_studio::complete(client, &providers.lm_studio, model()?, generation, prompt).await
         }
+        provider @ (Provider::DeepL | Provider::GoogleCloudTranslation | Provider::Caiyun) => {
+            Err(Error::CompletionUnsupported {
+                provider: provider.into(),
+            })
+        }
+        Provider::Local => unreachable!("local completion has its own backend"),
+    }
+}
+
+pub(crate) async fn translate(
+    client: &Client,
+    providers: &ProvidersConfig,
+    selection: &ModelSelection,
+    request: &TranslationRequest,
+) -> Result<Vec<String>> {
+    match selection.provider {
         Provider::DeepL => deepl::translate(client, &providers.deepl, request).await,
         Provider::GoogleCloudTranslation => {
             google_cloud::translate(client, &providers.google_cloud_translation, request).await
         }
         Provider::Caiyun => caiyun::translate(client, &providers.caiyun, request).await,
-        Provider::Local => unreachable!("local translation has its own backend"),
+        provider => unreachable!("{provider} translates through structured completion"),
     }
 }
 

@@ -10,8 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use super::send_json;
 use crate::{
-    GenerationConfig, Model, Provider, Result, TranslationRequest, backend::encode_image,
-    display_name, prompt,
+    GenerationConfig, Model, Prompt, Provider, Result, completion::encode_image, display_name,
 };
 
 const URL: &str = "https://api.deepseek.com/chat/completions";
@@ -44,32 +43,33 @@ pub(super) async fn models(client: &Client) -> Result<Vec<Model>> {
         .collect())
 }
 
-pub(super) async fn translate(
+pub(super) async fn complete(
     client: &Client,
     _config: &DeepSeekConfig,
     model: &str,
     generation: &GenerationConfig,
-    request: &TranslationRequest,
-) -> Result<Vec<String>> {
+    prompt: &Prompt,
+) -> Result<String> {
     let api_key = koharu_secrets::get("deepseek")?.context("deepseek API key is not configured")?;
-    let (system, user) = prompt::prompts(request)?;
-    let user_content = match request.image.as_deref() {
+    let user_content = match prompt.image.as_deref() {
         Some(image) => MessageContent::Parts(vec![
-            ContentPart::Text { text: user },
+            ContentPart::Text {
+                text: prompt.user.clone(),
+            },
             ContentPart::ImageUrl {
                 image_url: ImageUrl {
                     url: encode_image(image)?.data_url(),
                 },
             },
         ]),
-        None => MessageContent::Text(user),
+        None => MessageContent::Text(prompt.user.clone()),
     };
     let body = ChatRequest {
         model,
         messages: [
             Message {
                 role: "system",
-                content: MessageContent::Text(system),
+                content: MessageContent::Text(prompt.system.clone()),
             },
             Message {
                 role: "user",
@@ -94,15 +94,14 @@ pub(super) async fn translate(
             .json(&body),
     )
     .await?;
-    let text = response
+    Ok(response
         .choices
         .into_iter()
         .next()
         .context("DeepSeek returned no choices")?
         .message
         .content
-        .context("DeepSeek returned no message content")?;
-    Ok(prompt::translations("deepseek", &text, &request.segments)?)
+        .context("DeepSeek returned no message content")?)
 }
 
 #[derive(Serialize)]

@@ -11,8 +11,8 @@ use url::Url;
 
 use super::send_json;
 use crate::{
-    GenerationConfig as TranslationGeneration, Model, Provider, Result, TranslationRequest,
-    backend::encode_image, prompt,
+    GenerationConfig as TranslationGeneration, Model, Prompt, Provider, Result,
+    completion::encode_image,
 };
 
 const ROOT: &str = "https://generativelanguage.googleapis.com/v1beta/models";
@@ -73,23 +73,21 @@ fn supports_translation(id: &str) -> bool {
     .any(|marker| id.contains(marker))
 }
 
-pub(super) async fn translate(
+pub(super) async fn complete(
     client: &Client,
     _config: &GeminiConfig,
     model: &str,
     generation: &TranslationGeneration,
-    request: &TranslationRequest,
-) -> Result<Vec<String>> {
+    prompt: &Prompt,
+) -> Result<String> {
     let api_key = koharu_secrets::get("gemini")?.context("gemini API key is not configured")?;
-    let (system, user) = prompt::prompts(request)?;
-    let schema = prompt::output_schema(request.segments.len());
     let mut url =
         Url::parse(&format!("{ROOT}/{model}:generateContent")).expect("Gemini API root is valid");
     url.query_pairs_mut()
         .append_pair("key", api_key.expose_secret());
     let body = Request {
-        system_instruction: Content::text(&system),
-        contents: [Content::user(&user, request.image.as_deref())?],
+        system_instruction: Content::text(&prompt.system),
+        contents: [Content::user(&prompt.user, prompt.image.as_deref())?],
         generation_config: GenerationConfig {
             temperature: generation.temperature,
             max_output_tokens: generation.max_tokens,
@@ -113,18 +111,17 @@ pub(super) async fn translate(
                 }),
             }),
             response_mime_type: "application/json",
-            response_json_schema: schema,
+            response_json_schema: prompt.schema.clone(),
         },
     };
     let response: Response = send_json("gemini", client.post(url).json(&body)).await?;
-    let text = response
+    Ok(response
         .candidates
         .into_iter()
         .next()
         .and_then(|candidate| candidate.content.parts.into_iter().next())
         .context("Gemini returned no candidate content")?
-        .text;
-    Ok(prompt::translations("gemini", &text, &request.segments)?)
+        .text)
 }
 
 #[derive(Serialize)]
@@ -242,21 +239,18 @@ mod tests {
 
     #[test]
     fn serializes_structured_output_configuration() {
+        let prompt = crate::completion::test_prompt(None);
         let config = GenerationConfig {
             temperature: None,
             max_output_tokens: None,
             thinking_config: None,
             response_mime_type: "application/json",
-            response_json_schema: prompt::output_schema(2),
+            response_json_schema: prompt.schema.clone(),
         };
         let value = serde_json::to_value(config).unwrap();
         assert_eq!(value["responseMimeType"], "application/json");
         assert!(value.get("thinkingConfig").is_none());
-        assert_eq!(
-            value["responseJsonSchema"]["properties"]["translations"]["items"]["properties"]["id"]
-                ["maximum"],
-            1
-        );
+        assert_eq!(value["responseJsonSchema"], prompt.schema);
     }
 
     #[test]

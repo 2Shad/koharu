@@ -10,8 +10,7 @@ use url::Url;
 
 use super::send_json;
 use crate::{
-    GenerationConfig, Model, Provider, Result, TranslationRequest, backend::encode_image,
-    display_name, prompt,
+    GenerationConfig, Model, Prompt, Provider, Result, completion::encode_image, display_name,
 };
 
 const DEFAULT_BASE_URL: &str = "http://localhost:1234";
@@ -30,32 +29,33 @@ impl Default for LmStudioConfig {
     }
 }
 
-pub(super) async fn translate(
+pub(super) async fn complete(
     client: &Client,
     config: &LmStudioConfig,
     model: &str,
     generation: &GenerationConfig,
-    request: &TranslationRequest,
-) -> Result<Vec<String>> {
+    prompt: &Prompt,
+) -> Result<String> {
     let api_key = koharu_secrets::get("lm-studio")?;
-    let (system, user) = prompt::prompts(request)?;
-    let user_content = match request.image.as_deref() {
+    let user_content = match prompt.image.as_deref() {
         Some(image) => MessageContent::Parts(vec![
-            ContentPart::Text { text: user },
+            ContentPart::Text {
+                text: prompt.user.clone(),
+            },
             ContentPart::ImageUrl {
                 image_url: ImageUrl {
                     url: encode_image(image)?.data_url(),
                 },
             },
         ]),
-        None => MessageContent::Text(user),
+        None => MessageContent::Text(prompt.user.clone()),
     };
     let body = ChatRequest {
         model,
         messages: [
             Message {
                 role: "system",
-                content: MessageContent::Text(system),
+                content: MessageContent::Text(prompt.system.clone()),
             },
             Message {
                 role: "user",
@@ -73,9 +73,9 @@ pub(super) async fn translate(
         response_format: ResponseFormat {
             kind: "json_schema",
             json_schema: JsonSchema {
-                name: "manga_translation",
+                name: prompt.name,
                 strict: true,
-                schema: prompt::output_schema(request.segments.len()),
+                schema: prompt.schema.clone(),
             },
         },
     };
@@ -87,15 +87,14 @@ pub(super) async fn translate(
         None => http,
     };
     let response: ChatResponse = send_json("lm-studio", http).await?;
-    let text = response
+    Ok(response
         .choices
         .into_iter()
         .next()
         .context("LM Studio returned no choices")?
         .message
         .content
-        .context("LM Studio returned no message content")?;
-    Ok(prompt::translations("lm-studio", &text, &request.segments)?)
+        .context("LM Studio returned no message content")?)
 }
 
 pub(super) async fn models(client: &Client, config: &LmStudioConfig) -> Result<Vec<Model>> {
@@ -301,6 +300,7 @@ mod tests {
 
     #[test]
     fn serializes_lm_studio_request_contract() {
+        let prompt = crate::completion::test_prompt(None);
         let body = ChatRequest {
             model: "publisher/model",
             messages: [
@@ -322,9 +322,9 @@ mod tests {
             response_format: ResponseFormat {
                 kind: "json_schema",
                 json_schema: JsonSchema {
-                    name: "manga_translation",
+                    name: prompt.name,
                     strict: true,
-                    schema: prompt::output_schema(2),
+                    schema: prompt.schema.clone(),
                 },
             },
         };
@@ -334,6 +334,14 @@ mod tests {
         assert_eq!(value["reasoning_effort"], "none");
         assert_eq!(value["response_format"]["type"], "json_schema");
         assert_eq!(value["response_format"]["json_schema"]["strict"], true);
+        assert_eq!(
+            value["response_format"]["json_schema"]["name"],
+            "test_prompt"
+        );
+        assert_eq!(
+            value["response_format"]["json_schema"]["schema"],
+            prompt.schema
+        );
     }
 
     #[test]

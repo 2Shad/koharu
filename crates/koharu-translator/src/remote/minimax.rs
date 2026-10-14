@@ -7,7 +7,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 use super::send_json;
-use crate::{GenerationConfig, Model, Provider, Result, TranslationRequest, display_name, prompt};
+use crate::{GenerationConfig, Model, Prompt, Provider, Result, display_name};
 
 // MiniMax recommends compatibility APIs, but this provider intentionally uses its native route.
 const URL: &str = "https://api.minimax.io/v1/text/chatcompletion_v2";
@@ -40,15 +40,14 @@ pub(super) async fn models(client: &Client) -> Result<Vec<Model>> {
         .collect())
 }
 
-pub(super) async fn translate(
+pub(super) async fn complete(
     client: &Client,
     _config: &MiniMaxConfig,
     model: &str,
     generation: &GenerationConfig,
-    request: &TranslationRequest,
-) -> Result<Vec<String>> {
+    prompt: &Prompt,
+) -> Result<String> {
     let api_key = koharu_secrets::get("minimax")?.context("minimax API key is not configured")?;
-    let (system, user) = prompt::prompts(request)?;
     let response: Response = send_json(
         "minimax",
         client
@@ -59,17 +58,17 @@ pub(super) async fn translate(
                 messages: [
                     Message {
                         role: "system",
-                        content: system,
+                        content: prompt.system.clone(),
                     },
                     Message {
                         role: "user",
-                        content: user,
+                        content: prompt.user.clone(),
                     },
                 ],
                 temperature: generation.temperature,
                 top_p: generation.top_p,
                 max_completion_tokens: generation.max_tokens,
-                response_format: response_format(model, request.segments.len()),
+                response_format: response_format(model, prompt),
             }),
     )
     .await?;
@@ -81,14 +80,13 @@ pub(super) async fn translate(
         )
         .into());
     }
-    let text = response
+    Ok(response
         .choices
         .into_iter()
         .next()
         .context("MiniMax returned no choices")?
         .message
-        .content;
-    Ok(prompt::translations("minimax", &text, &request.segments)?)
+        .content)
 }
 
 #[derive(Serialize)]
@@ -119,13 +117,13 @@ struct JsonSchema {
     schema: serde_json::Value,
 }
 
-fn response_format(model: &str, expected: usize) -> Option<ResponseFormat> {
+fn response_format(model: &str, prompt: &Prompt) -> Option<ResponseFormat> {
     (model == "MiniMax-Text-01").then(|| ResponseFormat {
         kind: "json_schema",
         json_schema: JsonSchema {
-            name: "manga_translation",
+            name: prompt.name,
             strict: true,
-            schema: prompt::output_schema(expected),
+            schema: prompt.schema.clone(),
         },
     })
 }
@@ -192,7 +190,7 @@ mod tests {
             temperature: Some(0.7),
             top_p: Some(0.95),
             max_completion_tokens: Some(1024),
-            response_format: response_format("MiniMax-M3", 2),
+            response_format: response_format("MiniMax-M3", &crate::completion::test_prompt(None)),
         };
         let value = serde_json::to_value(body).unwrap();
         assert_eq!(value["model"], "MiniMax-M3");
@@ -204,6 +202,7 @@ mod tests {
 
     #[test]
     fn serializes_schema_only_for_minimax_text_01() {
+        let prompt = crate::completion::test_prompt(None);
         let body = Request {
             model: "MiniMax-Text-01",
             messages: [
@@ -219,14 +218,18 @@ mod tests {
             temperature: None,
             top_p: None,
             max_completion_tokens: None,
-            response_format: response_format("MiniMax-Text-01", 2),
+            response_format: response_format("MiniMax-Text-01", &prompt),
         };
         let value = serde_json::to_value(body).unwrap();
 
         assert_eq!(value["response_format"]["type"], "json_schema");
         assert_eq!(
-            value["response_format"]["json_schema"]["schema"]["properties"]["translations"]["maxItems"],
-            2
+            value["response_format"]["json_schema"]["name"],
+            "test_prompt"
+        );
+        assert_eq!(
+            value["response_format"]["json_schema"]["schema"],
+            prompt.schema
         );
     }
 
