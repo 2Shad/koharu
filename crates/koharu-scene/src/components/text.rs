@@ -189,6 +189,66 @@ impl Component for Translation {
     }
 }
 
+/// Translation plus inline cues (`[sighs]`) and speaker. Readers ignore it once
+/// its spoken words differ from the translation's; user translation edits remove it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
+pub struct Dialogue {
+    pub script: Authored<String>,
+    pub character: Option<String>,
+}
+
+impl Revisioned for Dialogue {
+    fn revision() -> u16 {
+        1
+    }
+}
+
+impl SerializeRevisioned for Dialogue {
+    fn serialize_revisioned<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> std::result::Result<(), revision::Error> {
+        self.script.serialize_revisioned(writer)?;
+        self.character.serialize_revisioned(writer)
+    }
+}
+
+impl DeserializeRevisioned for Dialogue {
+    fn deserialize_revisioned<R: std::io::Read>(
+        reader: &mut R,
+    ) -> std::result::Result<Self, revision::Error> {
+        Ok(Self {
+            script: Authored::deserialize_revisioned(reader)?,
+            character: Option::deserialize_revisioned(reader)?,
+        })
+    }
+}
+
+impl Component for Dialogue {
+    const KIND: &'static str = "dev.koharu.text.dialogue";
+
+    fn validate(&self, _context: &ValidationContext<'_>) -> Result<()> {
+        validate_authored_text(&self.script)?;
+        if self.character.as_ref().is_some_and(|character| {
+            character.is_empty() || character.len() > 256 || character.contains('\0')
+        }) {
+            return Err(Error::invalid(
+                "dialogue character must be 1 to 256 bytes without NUL",
+            ));
+        }
+        Ok(())
+    }
+
+    fn origin(&self) -> Option<&Origin> {
+        Some(&self.script.origin)
+    }
+
+    fn set_origin(&mut self, origin: Origin) -> bool {
+        self.script.origin = origin;
+        true
+    }
+}
+
 fn validate_authored_text(value: &Authored<String>) -> Result<()> {
     if value.value.len() > 16 * 1024 * 1024 || value.value.contains('\0') {
         return Err(Error::invalid("text is too large or contains NUL"));

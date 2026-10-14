@@ -116,6 +116,7 @@ async fn built_in_component_schema_revisions_are_explicit() {
             schema::<Visibility>(),
             schema::<SourceText>(),
             schema::<Translation>(),
+            schema::<Dialogue>(),
             schema::<TextRole>(),
             schema::<OcrAnalysis>(),
             schema::<Group>(),
@@ -128,7 +129,7 @@ async fn built_in_component_schema_revisions_are_explicit() {
             schema::<crate::components::Assets>(),
             schema::<Relation>(),
         ],
-        [1; 18]
+        [1; 19]
     );
     assert_eq!(schema::<TextLayout>(), 2);
 }
@@ -148,6 +149,7 @@ async fn built_in_component_kinds_express_domain_ownership() {
             TextContent::KIND,
             SourceText::KIND,
             Translation::KIND,
+            Dialogue::KIND,
             TextRole::KIND,
             Group::KIND,
             TextGroup::KIND,
@@ -169,6 +171,7 @@ async fn built_in_component_kinds_express_domain_ownership() {
             "dev.koharu.text.content",
             "dev.koharu.text.source",
             "dev.koharu.text.translation",
+            "dev.koharu.text.dialogue",
             "dev.koharu.text.role",
             "dev.koharu.group",
             "dev.koharu.text.group",
@@ -1005,6 +1008,37 @@ async fn translation_requires_source_text() {
         )
     });
     assert!(matches!(result, Err(Error::Invalid(_))));
+}
+
+#[tokio::test]
+async fn dialogue_requires_translation() {
+    let session = Session::memory().await.unwrap();
+    let dialogue = Dialogue {
+        script: Authored::user("[sighs] Fine.".to_owned()),
+        character: Some("Mika".to_owned()),
+    };
+    let missing = session.snapshot().patch(|edit| {
+        let page = edit.add_page(page(), At::End)?;
+        let entity = edit.add_text_content(page, At::End)?;
+        edit.set(entity, &source("source"))?;
+        edit.set(entity, &dialogue)
+    });
+    assert!(matches!(missing, Err(Error::Invalid(_))));
+
+    let present = session.snapshot().patch(|edit| {
+        let page = edit.add_page(page(), At::End)?;
+        let entity = edit.add_text_content(page, At::End)?;
+        edit.set(entity, &source("source"))?;
+        edit.set(
+            entity,
+            &Translation {
+                text: Authored::user("Fine.".to_owned()),
+                language: Some(LanguageTag::new("en").unwrap()),
+            },
+        )?;
+        edit.set(entity, &dialogue)
+    });
+    assert!(present.is_ok());
 }
 
 #[tokio::test]

@@ -5,9 +5,9 @@
 //! relation endpoints.
 
 use crate::{
-    BubbleRegion, DetectionAnalysis, EntityId, EntityOrigin, Error, Geometry, Group, OcrAnalysis,
-    Page, Project, RasterLayer, Region, RegionSpec, Relation, Result, SourceText, TextContent,
-    TextGroup, TextLayout, TextRegion, TextRole, Translation, Typography, Visibility,
+    BubbleRegion, DetectionAnalysis, Dialogue, EntityId, EntityOrigin, Error, Geometry, Group,
+    OcrAnalysis, Page, Project, RasterLayer, Region, RegionSpec, Relation, Result, SourceText,
+    TextContent, TextGroup, TextLayout, TextRegion, TextRole, Translation, Typography, Visibility,
     component::{Component, ComponentRecord, ValidationContext, decode, key},
     components::Assets,
     state::{Components, State},
@@ -60,6 +60,7 @@ component_schema! {
     DETECTION_ANALYSIS = 15 => DetectionAnalysis,
     ASSETS = 16 => Assets,
     ENTITY_ORIGIN = 17 => EntityOrigin,
+    DIALOGUE = 18 => Dialogue,
 }
 
 pub(crate) fn validate_components(
@@ -82,6 +83,7 @@ pub(crate) fn validate_entity(state: &State, id: EntityId) -> Result<()> {
     let has_source = has(SOURCE_TEXT);
     let has_content = has(TEXT_CONTENT);
     let has_translation = has(TRANSLATION);
+    let has_dialogue = has(DIALOGUE);
     let has_region = has(REGION);
     let has_geometry = has(GEOMETRY);
     let has_raster = has(RASTER_LAYER);
@@ -102,13 +104,17 @@ pub(crate) fn validate_entity(state: &State, id: EntityId) -> Result<()> {
         })
     });
 
-    if (has_source || has_translation || has(TEXT_ROLE)) && !has_content {
+    if (has_source || has_translation || has_dialogue || has(TEXT_ROLE)) && !has_content {
         Err(Error::invalid(format!(
             "entity {id} carries text content data but is not text content"
         )))
     } else if has_translation && !has_source {
         Err(Error::invalid(format!(
             "entity {id} has a translation but no source text"
+        )))
+    } else if has_dialogue && !has_translation {
+        Err(Error::invalid(format!(
+            "entity {id} has dialogue but no translation"
         )))
     } else if has_text_group && !has_group {
         Err(Error::invalid(format!(
@@ -157,7 +163,9 @@ pub(crate) fn validate_entity(state: &State, id: EntityId) -> Result<()> {
         Err(Error::invalid(format!(
             "text content entity {id} also carries analysis or presentation components"
         )))
-    } else if has_region && (has_layout || has_typography || has_source || has_translation) {
+    } else if has_region
+        && (has_layout || has_typography || has_source || has_translation || has_dialogue)
+    {
         Err(Error::invalid(format!(
             "analysis region {id} also carries text presentation or content components"
         )))
@@ -166,7 +174,7 @@ pub(crate) fn validate_entity(state: &State, id: EntityId) -> Result<()> {
             "analysis region {id} has no geometry"
         )))
     } else if has_layout
-        && (has_source || has_translation || has_region || has_detection || has_ocr)
+        && (has_source || has_translation || has_dialogue || has_region || has_detection || has_ocr)
     {
         Err(Error::invalid(format!(
             "text layer {id} also carries content or analysis components"

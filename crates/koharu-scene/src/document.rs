@@ -1,9 +1,9 @@
 //! Resolved document views and intent-level edits over the generic scene kernel.
 
 use crate::{
-    At, DetectionAnalysis, Edit, EntityId, Geometry, Group, OcrAnalysis, Origin, PageRef, Presents,
-    Region, RegionSpec, Result, Snapshot, SourceText, TextContent, TextGroup, TextLayout, TextRole,
-    Translation, Typography, Visibility,
+    At, DetectionAnalysis, Dialogue, Edit, EntityId, Geometry, Group, OcrAnalysis, Origin, PageRef,
+    Presents, Region, RegionSpec, Result, Snapshot, SourceText, TextContent, TextGroup, TextLayout,
+    TextRole, Translation, Typography, Visibility,
 };
 
 #[derive(Copy, Clone)]
@@ -133,6 +133,10 @@ impl<'a> TextContentRef<'a> {
     }
 
     pub fn translation(self) -> Result<Option<Translation>> {
+        self.snapshot.component(self.id)
+    }
+
+    pub fn dialogue(self) -> Result<Option<Dialogue>> {
         self.snapshot.component(self.id)
     }
 
