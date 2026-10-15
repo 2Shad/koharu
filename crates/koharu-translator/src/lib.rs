@@ -106,35 +106,15 @@ impl Translator {
         Ok(())
     }
 
-    #[tracing::instrument(
-        target = "koharu_metrics",
-        name = "model_run",
-        skip_all,
-        fields(
-            stage = "translation",
-            provider = %selection.provider,
-            model = selection.model.as_deref().unwrap_or("provider_default"),
-            target_language = request.target_language.tag(),
-            outcome = tracing::field::Empty,
-        ),
-    )]
     pub async fn translate(
         &self,
         selection: &ModelSelection,
         generation: GenerationConfig,
         mut request: TranslationRequest,
     ) -> anyhow::Result<(&'static str, Vec<String>)> {
-        let _metric = tracing::info_span!(
-            target: "koharu_metrics",
-            "translation_request",
-            provider = %selection.provider,
-            model = selection.model.as_deref().unwrap_or("provider_default"),
-            target_language = request.target_language.tag(),
-        );
         let provider = selection.provider;
         let provider_id: &'static str = provider.into();
         if request.segments.is_empty() {
-            tracing::Span::current().record("outcome", "skipped");
             return Ok((provider_id, request.segments));
         }
 
@@ -171,24 +151,11 @@ impl Translator {
             }
             .into());
         }
-        tracing::Span::current().record("outcome", "completed");
         Ok((provider_id, translated))
     }
 
     /// Returns the provider id and raw JSON text. Machine-translation providers
     /// fail with `CompletionUnsupported`.
-    #[tracing::instrument(
-        target = "koharu_metrics",
-        name = "model_run",
-        skip_all,
-        fields(
-            stage = "completion",
-            prompt = prompt.name,
-            provider = %selection.provider,
-            model = selection.model.as_deref().unwrap_or("provider_default"),
-            outcome = tracing::field::Empty,
-        ),
-    )]
     pub async fn complete(
         &self,
         selection: &ModelSelection,
@@ -199,7 +166,6 @@ impl Translator {
         let text = self
             .completion(selection, generation.for_model(selection), prompt)
             .await?;
-        tracing::Span::current().record("outcome", "completed");
         Ok((provider_id, text))
     }
 

@@ -71,12 +71,6 @@ impl Speech {
         Ok(())
     }
 
-    #[tracing::instrument(
-        target = "koharu_metrics",
-        name = "model_run",
-        skip_all,
-        fields(stage = "speech", model = server::MODEL_ID, outcome = tracing::field::Empty),
-    )]
     pub async fn synthesize(&self, line: Line<'_>) -> Result<Audio> {
         let input = script::sanitize(line.script);
         if script::cues(&input).is_empty() {
@@ -128,7 +122,6 @@ impl Speech {
         }
         let wav = bytes.to_vec();
         let format = wav::format(&wav)?;
-        tracing::Span::current().record("outcome", "completed");
         Ok(Audio { wav, format })
     }
 

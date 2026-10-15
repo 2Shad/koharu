@@ -22,7 +22,6 @@ impl IpcResponse for SpeechBytes {
 }
 
 /// Reuses the stored recording unless `regenerate` is set or the line changed.
-#[tracing::instrument(target = "koharu_metrics", name = "speech_played", skip_all)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn speak(
@@ -81,7 +80,6 @@ pub(crate) async fn get_speech_model(speech: State<'_, Speech>) -> Result<Speech
     Ok(speech.model()?)
 }
 
-#[tracing::instrument(target = "koharu_metrics", name = "speech_installed", skip_all)]
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn install_speech(speech: State<'_, Speech>) -> Result<SpeechModel, Error> {
