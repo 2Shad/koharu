@@ -17,7 +17,7 @@ use anyhow::{Context, Result, bail, ensure};
 use koharu_llama::{
     context::{
         LlamaContext,
-        params::{LlamaAttentionType, LlamaContextParams},
+        params::{KvCacheType, LlamaAttentionType, LlamaContextParams},
     },
     llama_backend::LlamaBackend,
     llama_batch::LlamaBatch,
@@ -31,7 +31,7 @@ use minijinja::{Environment, Error as TemplateError, ErrorKind as TemplateErrorK
 
 use super::{
     Capabilities, ChatMessage, ChatTemplateOptions, FinishReason, Generation, GenerationControl,
-    GenerationOptions, Input, LoadOptions, Media, TokenChunk,
+    GenerationOptions, Input, LoadOptions, LoadProfile, Media, TokenChunk,
 };
 use crate::Backend;
 
@@ -43,6 +43,7 @@ pub(super) struct Model {
     model: LlamaModel,
     mtmd: Option<Mutex<MtmdContext>>,
     capabilities: Capabilities,
+    profile: Option<LoadProfile>,
     eos_token: LlamaToken,
     chat_template: ChatTemplate,
     llguidance_factory: OnceLock<std::result::Result<ParserFactory, String>>,
@@ -131,9 +132,12 @@ impl Model {
     pub(super) fn new(
         device: &crate::Device,
         model_path: PathBuf,
-        options: LoadOptions,
+        mut options: LoadOptions,
     ) -> Result<Self> {
         ensure_file(&model_path, "GGUF model")?;
+        if let Some(profile) = options.profile {
+            profile.apply_load_options(&mut options);
+        }
         let backend = crate::llama_backend().context("llama.cpp backend is not initialized")?;
         let params = model_params(backend, device, &options)?;
         let model = LlamaModel::load_from_file(backend, &model_path, &params)
@@ -146,6 +150,7 @@ impl Model {
         let eos_token = options
             .eos_token_id
             .map_or_else(|| model.token_eos(), LlamaToken::new);
+        let profile = options.profile;
         let chat_template = ChatTemplate::from_model(&model, eos_token)?;
         let (mtmd, capabilities) = match options.mtmd {
             Some(options) => {
@@ -163,7 +168,7 @@ impl Model {
                     &MtmdContextParams {
                         use_gpu: device.backend != Backend::Cpu && backend.supports_gpu_offload(),
                         print_timings: false,
-                        n_threads: available_threads(),
+                        n_threads: profile.map_or_else(available_threads, |profile| profile.n_threads),
                         image_min_tokens: options.image_min_tokens,
                         image_max_tokens: options.image_max_tokens,
                         ..MtmdContextParams::default()
@@ -197,6 +202,7 @@ impl Model {
             model,
             mtmd,
             capabilities,
+            profile,
             eos_token,
             chat_template,
             llguidance_factory: OnceLock::new(),
@@ -233,7 +239,11 @@ impl Model {
     where
         F: FnMut(TokenChunk<'_>) -> Result<GenerationControl>,
     {
-        validate_generation_options(options)?;
+        let mut options = options.clone();
+        if let Some(profile) = &self.profile {
+            profile.apply_generation_options(&mut options);
+        }
+        validate_generation_options(&options)?;
         if options.max_tokens == 0 {
             return Ok(Generation::empty(FinishReason::Length));
         }
@@ -250,12 +260,12 @@ impl Model {
             )
         };
         let prepared = self.prepare_prompt(input, options.add_special, mtmd.as_deref())?;
-        let context_config = context_config(&prepared, options)?;
+        let context_config = context_config(&prepared, &options, self.profile.as_ref())?;
         let mut context = self
             .model
             .new_context(self.backend, context_config.params)
             .context("failed to create llama.cpp context")?;
-        let mut sampler = self.build_sampler(options, json_schema, &prepared.history_tokens)?;
+        let mut sampler = self.build_sampler(&options, json_schema, &prepared.history_tokens)?;
 
         let prompt_start = Instant::now();
         let (mut next_token, mut position) = self.prefill(
@@ -618,7 +628,11 @@ fn model_params(
     Ok(params)
 }
 
-fn context_config(prepared: &PreparedPrompt, options: &GenerationOptions) -> Result<ContextConfig> {
+fn context_config(
+    prepared: &PreparedPrompt,
+    options: &GenerationOptions,
+    profile: Option<&LoadProfile>,
+) -> Result<ContextConfig> {
     let values = context_values(prepared, options)?;
     let mut params = LlamaContextParams::default()
         .with_n_ctx(Some(values.n_ctx))
@@ -632,6 +646,12 @@ fn context_config(prepared: &PreparedPrompt, options: &GenerationOptions) -> Res
     }
     if let Some(n_threads_batch) = options.n_threads_batch {
         params = params.with_n_threads_batch(n_threads_batch);
+    }
+    if profile.is_some() {
+        // Quantized KV cache keeps the mobile context inside its budget.
+        params = params
+            .with_type_k(KvCacheType::Q8_0)
+            .with_type_v(KvCacheType::Q8_0);
     }
     Ok(ContextConfig {
         params,
@@ -668,20 +688,21 @@ fn context_values(prepared: &PreparedPrompt, options: &GenerationOptions) -> Res
 
     let required_batch =
         u32::try_from(prepared.batch_tokens.max(1)).context("prompt batch size exceeds u32")?;
-    let n_batch = options.n_batch.unwrap_or(required_batch).max(1);
-    ensure!(
-        n_batch >= required_batch,
-        "n_batch is too small: need at least {required_batch} tokens"
-    );
+    // A text prompt is submitted as a single batch, so `n_batch` must cover the
+    // whole prompt; an explicit value is a floor, never an upper bound.
+    let n_batch = options
+        .n_batch
+        .unwrap_or(required_batch)
+        .max(required_batch)
+        .max(1);
     let n_ubatch = if prepared.non_causal {
         n_batch
     } else {
-        let n_ubatch = options
+        options
             .n_ubatch
             .unwrap_or_else(|| n_batch.min(DEFAULT_MAX_UBATCH))
-            .max(1);
-        ensure!(n_ubatch <= n_batch, "n_ubatch must not exceed n_batch");
-        n_ubatch
+            .min(n_batch)
+            .max(1)
     };
 
     Ok(ContextValues {
@@ -786,7 +807,7 @@ fn validate_image_token_range(min: i32, max: i32) -> Result<()> {
     Ok(())
 }
 
-fn available_threads() -> i32 {
+pub(super) fn available_threads() -> i32 {
     std::thread::available_parallelism()
         .map_or(1, std::num::NonZeroUsize::get)
         .try_into()
@@ -870,6 +891,17 @@ mod tests {
             ..Default::default()
         };
         assert!(context_values(&prepared(5, false), &options).is_err());
+    }
+
+    #[test]
+    fn context_raises_small_batch_to_prompt_length() {
+        let options = GenerationOptions {
+            max_tokens: 10,
+            n_batch: Some(4),
+            ..Default::default()
+        };
+        let config = context_values(&prepared(5, false), &options).unwrap();
+        assert_eq!(config.n_batch, 5);
     }
 
     #[test]

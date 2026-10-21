@@ -129,7 +129,7 @@ fn loader_tokens(library_names: &[String]) -> TokenStream {
                 .map(::std::convert::Into::into)
         }
 
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         fn __koharu_bindgen_already_loaded_library(
             library_file_name: &str,
         ) -> ::std::option::Option<::libloading::Library> {
@@ -143,7 +143,11 @@ fn loader_tokens(library_names: &[String]) -> TokenStream {
             .map(::std::convert::Into::into)
         }
 
-        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+        #[cfg(not(any(
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "android"
+        )))]
         fn __koharu_bindgen_already_loaded_library(
             _library_file_name: &str,
         ) -> ::std::option::Option<::libloading::Library> {

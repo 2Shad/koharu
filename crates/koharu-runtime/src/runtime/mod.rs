@@ -53,6 +53,7 @@ pub enum Feature {
 pub struct Runtime {
     plan: Plan,
     hardware: Hardware,
+    features: Vec<Feature>,
 }
 
 impl Runtime {
@@ -60,18 +61,35 @@ impl Runtime {
         let features = features.into_iter().collect::<Vec<_>>();
         let hardware = Hardware::discover();
         for candidate in hardware.candidates() {
-            if let Some(plan) = Self::plan(&features, &candidate)? {
+            if let Some((plan, resolved)) = Self::plan(&features, &candidate)? {
+                if resolved.len() < features.len() {
+                    let missing = features
+                        .iter()
+                        .filter(|feature| !resolved.contains(feature))
+                        .collect::<Vec<_>>();
+                    tracing::warn!(?missing, "requested runtime features were not activated");
+                }
                 return Ok(Self {
                     plan,
                     hardware: candidate,
+                    features: resolved,
                 });
             }
         }
         anyhow::bail!("no device supports the requested runtime features")
     }
 
-    fn plan(features: &[Feature], hardware: &Hardware) -> Result<Option<Plan>> {
+    /// The requested features that resolved on the selected device. Backends for
+    /// requested features absent from this list were not activated and must not
+    /// be initialized by the caller.
+    #[must_use]
+    pub fn features(&self) -> Vec<Feature> {
+        self.features.clone()
+    }
+
+    fn plan(features: &[Feature], hardware: &Hardware) -> Result<Option<(Plan, Vec<Feature>)>> {
         let mut plan = Plan::default();
+        let mut resolved = Vec::new();
         let mut previous = None;
 
         for feature in features {
@@ -80,8 +98,9 @@ impl Runtime {
                 Feature::Llama => plan.require::<Llama>(hardware)?,
                 Feature::Diffusion => plan.require::<Diffusion>(hardware)?,
             }) else {
-                return Ok(None);
+                continue;
             };
+            resolved.push(*feature);
             if let Some(previous) = previous
                 && previous != node
             {
@@ -89,7 +108,11 @@ impl Runtime {
             }
             previous = Some(node);
         }
-        Ok(Some(plan))
+
+        if resolved.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some((plan, resolved)))
     }
 
     /// Installs and activates packages, then returns the process-wide device.
