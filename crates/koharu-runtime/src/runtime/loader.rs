@@ -4,7 +4,14 @@ use anyhow::Result;
 
 pub(super) fn load(path: impl AsRef<Path>, global: bool) -> Result<()> {
     let path = path.as_ref();
-    let path = dunce::canonicalize(path)?;
+    // Bundled Android runtimes are named by bare soname; the linker resolves them
+    // through the app's native library search path and there is no file to
+    // canonicalize. Fall back to the raw path so `dlopen` receives the soname.
+    let path = match dunce::canonicalize(path) {
+        Ok(path) => path,
+        Err(_) if cfg!(target_os = "android") => path.to_owned(),
+        Err(error) => return Err(error.into()),
+    };
     let library = unsafe { open(&path, global) }?;
     forget(library);
     Ok(())

@@ -12,9 +12,13 @@ what "done" means.
   `koharu-android` plugin crate (SAF import/export, share sheet, Keystore, foreground
   service, back button), the `koharu-app` picker/export abstraction, installable secrets
   backends, foreground work tracking, and the mobile back-button registry. The Android
-  Rust graph and the debug APK both build. Device verification of the M1 exit criteria is
-  open, and M2 is not started. The port targets Android and desktop; a non-Android mobile
-  build compiles with the pre-M1 "picker unavailable" behavior but is not supported.
+  Rust graph and the debug APK both build. M2 code has landed: a bundled Android llama
+  package, the Android CPU/Vulkan hardware probe, tolerant runtime discovery, the mobile
+  load profile with RAM-class budget checks, the bindgen Android loader arm, and a
+  benchmark harness; `cargo ndk check -p koharu` is green. Device verification of the M1
+  and M2 exit criteria (real Gemma 4 E4B translation, benchmark numbers) is open. The port
+  targets Android and desktop; a non-Android mobile build compiles with the pre-M1 "picker
+  unavailable" behavior but is not supported.
 
 ## How to use this document
 
@@ -271,18 +275,25 @@ multi-select document import, document-tree export, and create-document export.
 - [ ] Publish `aarch64-linux-android` `libllama`/`libmtmd` from `koharu-rs/llama`
       (NDK r27c, API 31, `GGML_OPENMP=OFF`, `GGML_LLAMAFILE=OFF`, KleidiAI on,
       `-Wl,-z,max-page-size=16384` for Play's 16 KB page rule)
-- [ ] `Bundled` package source in `koharu-runtime`; Android arms in `Llama::discover` and
+      — external to this repository; the consumer side assumes both libraries are in the
+      APK's `jniLibs`
+- [x] `Bundled` package source in `koharu-runtime`; Android arms in `Llama::discover` and
       `library_names()`
-- [ ] Android hardware probe: CPU device always; Vulkan behind a setting, off by default
-      (Adreno Vulkan/OpenCL is frequently slower than CPU for small models and unstable)
-- [ ] Mobile load profile: `gpu_layers = 0`, thread count from performance-core topology,
-      mmap, capped `n_ctx`, q8 KV cache, lean `n_batch`/`n_ubatch`
-- [ ] RAM class detection (`ActivityManager.getMemoryClass()` and `/proc/meminfo`) → profile
-      selection; refuse loads that exceed budget with a readable error
-- [ ] `koharu-bindgen`: Android arm in `already_loaded_library` (`rewrite.rs:146-151`)
+- [x] Android hardware probe: CPU device always; Vulkan behind a setting, off by default
+      (`android_vulkan` in the runtime config section; Adreno Vulkan/OpenCL is frequently
+      slower than CPU for small models and unstable)
+- [x] Mobile load profile: `gpu_layers = 0` on the CPU path / Vulkan opt-in offload, mmap,
+      q8 KV cache, performance-core thread count, lean `n_ubatch`
+- [x] RAM class detection (`/proc/meminfo`) → profile selection; refuse loads that exceed
+      budget with a readable error. (`ActivityManager.getMemoryClass()` is not consulted;
+      `/proc/meminfo` is self-contained and reports the conservative class)
+- [x] `koharu-bindgen`: Android arm in `already_loaded_library` (`rewrite.rs:146-151`),
+      and the `-sys` crates declare `libc` for `android`
 - [ ] Gemma 4 E4B end-to-end translation; BYOK providers verified on device
 - [ ] Benchmark harness + numbers per reference device (tok/s, page latency, peak RSS,
       thermal status); document in `packages/docs/hardware.mdx`
+      — harness landed (the `koharu-translator` `bench` bin) and the docs carry a results
+      table template; the numbers need the reference devices
 
 **Exit criteria:** a page translated fully on-device in airplane mode, with recorded numbers
 and no OOM.
@@ -454,3 +465,5 @@ and what the next session should pick up.
 | 2026-10-21 | M0 review | Fixed `clippy::redundant_closure` in `koharu-bindgen`. Hid the Providers tab on mobile until the M1 Keystore store: a typed credential made "Back to editor" fail forever. Corrected the plan's stale Settings, startup, and external-link rows, the M4 Settings/safe-area overlap, the `adb reverse` note, and the desktop-error note (command errors are already toasted by `call()` in `packages/koharu/lib/backend.ts`). Added tag-triggered preview releases (`android-m0-*`, `CARGO_PROFILE_DEV_DEBUG=0`) and made the desktop Release workflow ignore `android-*` tags. CI run not verified yet. | Rerun CI, install and boot on a physical phone, rerun the WebGPU probe on hardware |
 | 2026-10-21 | M1 | Added the `koharu-android` Tauri mobile plugin (SAF import/tree/create-document, share sheet, Keystore AES-GCM store, foreground service + partial wakelock, background command) and registered it from `crates/koharu`; `koharu-app` gained the picker/`Destination` abstraction with app-cache staging, `koharu-secrets` gained an installable `Backend`, and zero-prose notification payloads; the frontend gained `lib/back.ts`, re-enabled the Providers tab, and shows a platform-specific storage note in all 11 locales. `tauri-plugin-dialog` was rejected as the picker (content URIs, no tree picker) and the risk is closed. Verified: `cargo check -p koharu`, `cargo ndk -t arm64-v8a check -p koharu`, `cargo tauri android build --debug --target aarch64`, `:koharu-android:compileDebugKotlin`, oxlint + tsc; the APK installs and boots to StartView on the API 35 emulator. | Exercise the exit criteria on a device (import a CBZ, export a PNG, save a key, run a job with the screen off), then start M2 |
 | 2026-10-21 | M1 review fixes | Corrected the review findings: the import picker no longer MIME-filters (it hid `.cbz`/`.rar`); an undecryptable Keystore entry is dropped and reported unset instead of failing `Preferences::load`; `POST_NOTIFICATIONS` is requested at the first foreground start; the foreground refcount lock spans the count and the start/stop send, removing the stop-after-start race; notification text is data only and its title falls back to the application label; the back registry closes Settings with a save and the delete confirmation before backgrounding, and uses `dispatch`; non-Android mobile compiles again with the pre-M1 "picker unavailable" arms. Also removed the stale plugin `settings.gradle`, the unused `serde_json` dependency, and made the service instance `@Volatile`. | Same as M1: device verification, then M2 |
+| 2026-10-21 | M2 code | `koharu-runtime`: the Android probe always exposes a CPU device (memory from `/proc/meminfo`) and a Vulkan device only when the `runtime` config section sets `android_vulkan`; `Llama::AndroidCpu`/`AndroidVulkan` are bundled (no download, dlopen by soname); `Runtime::discover` now skips requested features with no package and exposes `Runtime::features()`; bundled loader falls back to the bare soname. `koharu-bindgen`: the `RTLD_NOLOAD` already-loaded arm covers `android`, and the three `-sys` crates declare `libc` for Android. `koharu-ml`: `llm::profile` owns the RAM classes/budgets, the mobile load profile (mmap, q8 KV, performance-core threads, capped context/tokens) and a budget guard; `koharu-ml::init` initializes only the backends that resolved. `koharu-translator`: the local translator applies the mobile profile; a new `bench` bin reports tok/s, page latency, peak RSS, and thermal status. Docs: Android section in `hardware.mdx` (en/ja/zh). Verified: `cargo check` for the four crates, `cargo ndk -t arm64-v8a check -p koharu`, and the focused `koharu-ml` `llm::` tests (10 pass). | Publish the `aarch64-linux-android` llama libs, install on a physical phone, run the WebGPU probe and the `bench` harness, then fill the hardware table |
+| 2026-10-21 | M2 review fixes | The Vulkan setting is now meaningful: the loader no longer forces `gpu_layers = 0`, so the CPU path runs zero layers and the opt-in Vulkan device offloads. The forced `n_ctx`/`max_tokens` caps were removed (context derives from the prompt) so long pages no longer hard-fail or truncate; the performance-core thread fallback no longer uses every core; the budget guard now counts the mmproj projector; the benchmark harness applies the mobile profile; `loader::load` only falls back to a bare soname on Android; discovery logs skipped features. Docs: `hardware.mdx` (en/ja/zh) now states the milestone covers translation and documents the `[runtime] android_vulkan` key, and the M2 profile item matches the loader. Verified: focused `koharu-ml` `llm::` tests and `cargo check`. | Publish the Android llama libs and verify on a physical phone |

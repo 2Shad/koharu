@@ -36,6 +36,47 @@ Koharu 会下载所用功能需要的原生库与模型文件。运行发行版�
   适配器和显卡驱动。
 </Note>
 
+## Android
+
+Android 版本设计为在设备上完成检测、OCR、翻译和修补，因此首个发行版可离线运行。当前里程碑在设备上运行的是随包的 llama.cpp 翻译运行时；检测、OCR 和修补仍在陆续落地。Android 不会下载可执行代码：llama.cpp 运行时（`libllama`、`libmtmd`）随 APK 一同打包，并从应用的本地库目录加载。模型权重属于数据，按常规下载。
+
+### 移动端模型配置
+
+按设备的 RAM 等级选择配置。翻译默认仅文本，只有在启用视觉路径时才加载视觉投影器。超出设备预算的加载会被直接拒绝并给出可读的错误，而不是稍后才失败。
+
+| 设备 RAM | 翻译 | 检测 | OCR | 修补 | 峰值预算 |
+| -------- | ---- | ---- | --- | ---- | -------- |
+| 6–8 GB   | Gemma 4 E2B Q2_K_XL | PP-DocLayout / YOLO26s | PP-OCRv6 / MangaOCR | AOT | 约 3.5 GB |
+| 8–12 GB  | Gemma 4 E4B Q2_K_XL | PP-DocLayoutV3 | MangaOCR / PaddleOCR-VL GGUF | AOT / LaMa | 约 4.5 GB |
+| 12–16 GB | Gemma 4 E4B Q4_K_XL | RF-DETR Seg 2XL | PaddleOCR-VL GGUF / MangaOCR | LaMa | 约 5.5 GB |
+
+### 加速器
+
+CPU 始终可用，运行时 `gpu_layers` 为 0。Vulkan 默认关闭，可通过配置文件的 `android_vulkan` 开启（默认 `false`）：
+
+```toml
+[runtime]
+android_vulkan = true
+```
+
+对小型模型而言，Adreno 的 Vulkan/OpenCL 往往比 CPU 更慢，而且可能不稳定。移动端加载配置的线程数取自性能核拓扑，并使用 mmap 和 Q8 KV 缓存。
+
+### 基准测试
+
+在设备上运行测试工具，逐行记录结果：
+
+```sh
+cargo run -p koharu-translator --bin bench -- --model <model.gguf> --quantization Q4_K_XL --cpu
+```
+
+为每台参考设备填写一行。加 `--json` 可输出原始记录。
+
+| 设备 | SoC | RAM | 量化 | 提示 tok/s | 生成 tok/s | 页面延迟 | 峰值 RSS | 温度 |
+| ---- | --- | --- | ---- | ---------- | ---------- | -------- | -------- | ---- |
+| 8 GB 中端 |  | 8 GB | Q2_K_XL |  |  |  |  |  |
+| 12 GB 旗舰 |  | 12 GB | Q4_K_XL |  |  |  |  |  |
+| 6 GB 下限 |  | 6 GB | Q2_K_XL |  |  |  |  |  |
+
 ## 下载与缓存
 
 | 数据                                     | 获取时机               |

@@ -74,6 +74,10 @@ pub(crate) enum Llama {
         )
     )]
     MacosMetal,
+    #[strum(serialize = "android-cpu", props(libraries = "libllama.so,libmtmd.so"))]
+    AndroidCpu,
+    #[strum(serialize = "android-vulkan", props(libraries = "libllama.so,libmtmd.so"))]
+    AndroidVulkan,
 }
 
 impl Llama {
@@ -96,6 +100,13 @@ impl sealed::Sealed for Llama {}
 
 impl Package for Llama {
     async fn install(self) -> Result<PathBuf> {
+        // Android bundles libllama/libmtmd in the APK's jniLibs and resolves the
+        // bare soname through the app's native library directory, so there is no
+        // download target; `<empty>.join("libllama.so")` yields the bare soname.
+        if matches!(self, Self::AndroidCpu | Self::AndroidVulkan) {
+            return Ok(PathBuf::new());
+        }
+
         let target = Store::root()
             .join("llama")
             .join(RELEASE)
@@ -123,6 +134,13 @@ impl Package for Llama {
 
 impl DiscoverablePackage for Llama {
     fn discover(hardware: &Hardware) -> Option<Self> {
+        if cfg!(target_os = "android") {
+            return Some(if hardware.supports_vulkan() {
+                Self::AndroidVulkan
+            } else {
+                Self::AndroidCpu
+            });
+        }
         if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
             if hardware.supports_cuda() {
                 return Some(Self::WindowsCuda);
@@ -162,7 +180,11 @@ impl RuntimePackage for Llama {
                 Component::Cuda(Cuda::Blas13),
             ]),
             Self::WindowsHip | Self::LinuxHip => Ok(vec![Component::Rocm(hardware.rocm_target()?)]),
-            Self::WindowsVulkan | Self::LinuxVulkan | Self::MacosMetal => Ok(Vec::new()),
+            Self::WindowsVulkan
+            | Self::LinuxVulkan
+            | Self::MacosMetal
+            | Self::AndroidCpu
+            | Self::AndroidVulkan => Ok(Vec::new()),
         }
     }
 

@@ -1,6 +1,7 @@
 //! High-level local LLM inference backed by llama.cpp.
 
 mod model;
+mod profile;
 
 use std::{num::NonZeroU32, path::PathBuf, time::Duration};
 
@@ -12,6 +13,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use self::model::Model;
 
 pub use koharu_llama::model::params::LlamaLoadMode;
+pub use profile::{LoadProfile, RamClass};
 
 const DEFAULT_GPU_LAYERS: u32 = 1000;
 const DEFAULT_MAX_TOKENS: usize = 512;
@@ -42,6 +44,13 @@ impl Llm {
         options: LoadOptions,
     ) -> Result<Self> {
         let model_path = model_path.into();
+        if let Some(profile) = &options.profile {
+            let projector = options
+                .mtmd
+                .as_ref()
+                .map(|mtmd| mtmd.projector_path.as_path());
+            profile.check_budget(&model_path, projector)?;
+        }
         let model = tokio_rayon::spawn(move || Model::new(&device, model_path, options)).await?;
         Ok(Self { model })
     }
@@ -135,6 +144,8 @@ pub struct LoadOptions {
     pub eos_token_id: Option<i32>,
     /// Optional multimodal projector configuration.
     pub mtmd: Option<MtmdOptions>,
+    /// Android load profile the loader applies; `None` on desktop.
+    pub profile: Option<LoadProfile>,
 }
 
 impl Default for LoadOptions {
@@ -144,6 +155,7 @@ impl Default for LoadOptions {
             load_mode: LlamaLoadMode::Auto,
             eos_token_id: None,
             mtmd: None,
+            profile: None,
         }
     }
 }

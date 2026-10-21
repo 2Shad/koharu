@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use koharu_ml::llm::{
-    ChatMessage, ChatTemplateOptions, Input, Llm, LoadOptions, MtmdOptions, media_marker,
+    ChatMessage, ChatTemplateOptions, Input, Llm, LoadOptions, LoadProfile, MtmdOptions,
+    media_marker,
 };
 
 mod catalog;
@@ -36,6 +37,8 @@ impl LocalTranslator {
         let resolved = descriptor.resolve(selection).await?;
         let options = LoadOptions {
             mtmd: resolved.projector.map(MtmdOptions::new),
+            // Android loads through the lean mobile profile; `None` on desktop.
+            profile: LoadProfile::for_device(),
             ..LoadOptions::default()
         };
         let llm = Llm::load_with_options(device, resolved.model, options)

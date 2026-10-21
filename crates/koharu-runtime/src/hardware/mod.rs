@@ -1,3 +1,4 @@
+mod android;
 mod cuda;
 mod hip;
 mod vulkan;
@@ -25,7 +26,18 @@ impl Hardware {
 
     fn probe() -> Self {
         let mut devices = Vec::new();
-        if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        if cfg!(target_os = "android") {
+            // Android always exposes a CPU device; Vulkan is opt-in because
+            // Adreno Vulkan/OpenCL is frequently slower than CPU for the small
+            // mobile translation profile.
+            devices.push(android::cpu_device());
+            if android::vulkan_enabled() && vulkan::probe() {
+                devices.push(Device {
+                    description: "Vulkan".to_owned(),
+                    ..Device::vulkan(0)
+                });
+            }
+        } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
             devices.push(Device {
                 description: "Metal".to_owned(),
                 device_type: DeviceType::IntegratedGpu,
@@ -47,7 +59,7 @@ impl Hardware {
             .enumerate()
             .filter_map(|(position, device)| {
                 // Lower categories are preferred: Metal or discrete CUDA, discrete
-                // ROCm, integrated CUDA, integrated ROCm, then Vulkan.
+                // ROCm, integrated CUDA, integrated ROCm, Vulkan, then Android CPU.
                 let category = match (&device.backend, device.is_integrated()) {
                     (Backend::Metal, _) => 0,
                     (Backend::Cuda, false) => 0,
@@ -55,6 +67,9 @@ impl Hardware {
                     (Backend::Cuda, true) => 2,
                     (Backend::Rocm, true) => 3,
                     (Backend::Vulkan, _) => 4,
+                    // Android's always-present CPU device is preferred last; it is
+                    // the only candidate when Vulkan is disabled.
+                    (Backend::Cpu, _) => 5,
                     _ => return None,
                 };
                 Some((position, category))

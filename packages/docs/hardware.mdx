@@ -43,6 +43,47 @@ Startup chooses a shared ML device from the available backends: Metal on Apple s
   and graphics driver when ML inference runs on CPU.
 </Note>
 
+## Android
+
+The Android build is designed to run detection, OCR, translation, and inpainting fully on-device, so the first release works offline. The current milestone covers translation through the bundled llama.cpp runtime; detection, OCR, and inpainting are still landing. Android never downloads executable code: the llama.cpp runtime (`libllama`, `libmtmd`) is bundled in the APK and resolved from the app's native library directory. Model weights are data and download as usual.
+
+### Mobile model profiles
+
+Pick the profile that matches the device's RAM class. Translation is text-only by default; the vision projector loads only when the vision path is enabled. A load that would exceed the device's budget is refused with a readable error instead of failing later.
+
+| Device RAM | Translation | Detection | OCR | Inpaint | Peak budget |
+| ---------- | ----------- | --------- | --- | ------- | ----------- |
+| 6–8 GB     | Gemma 4 E2B Q2_K_XL | PP-DocLayout / YOLO26s | PP-OCRv6 / MangaOCR | AOT | ~3.5 GB |
+| 8–12 GB    | Gemma 4 E4B Q2_K_XL | PP-DocLayoutV3 | MangaOCR / PaddleOCR-VL GGUF | AOT / LaMa | ~4.5 GB |
+| 12–16 GB   | Gemma 4 E4B Q4_K_XL | RF-DETR Seg 2XL | PaddleOCR-VL GGUF / MangaOCR | LaMa | ~5.5 GB |
+
+### Accelerators
+
+The CPU device is always available and runs with `gpu_layers = 0`. Vulkan is off by default; opt in with `android_vulkan` in the configuration file (default `false`):
+
+```toml
+[runtime]
+android_vulkan = true
+```
+
+Adreno Vulkan/OpenCL is frequently slower than CPU for small models and can be unstable. The mobile load profile derives the thread count from the performance-core topology and uses mmap with a Q8 KV cache.
+
+### Benchmarks
+
+Run the harness on the device to record a row:
+
+```sh
+cargo run -p koharu-translator --bin bench -- --model <model.gguf> --quantization Q4_K_XL --cpu
+```
+
+Fill one row per reference device. Add `--json` for the raw record.
+
+| Device | SoC | RAM | Quant | Prompt tok/s | Generation tok/s | Page latency | Peak RSS | Thermal |
+| ------ | --- | --- | ----- | ------------ | ---------------- | ------------ | -------- | ------- |
+| 8 GB mid-range |  | 8 GB | Q2_K_XL |  |  |  |  |  |
+| 12 GB flagship |  | 12 GB | Q4_K_XL |  |  |  |  |  |
+| 6 GB floor |  | 6 GB | Q2_K_XL |  |  |  |  |  |
+
 ## Downloads and caches
 
 | Data                                                      | When it is needed                       |
