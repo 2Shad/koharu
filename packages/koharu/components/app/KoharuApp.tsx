@@ -7,6 +7,7 @@ import { TitleBar } from '@/components/app/TitleBar'
 import { Editor } from '@/components/editor/Editor'
 import { SettingsPage } from '@/components/preferences/SettingsPage'
 import { StartView } from '@/components/start/StartView'
+import { startBackButton } from '@/lib/back'
 import { useProject } from '@/lib/queries'
 import { useKoharuStore } from '@/lib/store'
 import { cn } from '@koharu/ui/lib/utils'
@@ -28,6 +29,14 @@ export function KoharuApp() {
     selectPages(activePage ? [activePage] : [])
     selectLayers([])
   }, [activePage, projectLoaded, selectLayers, selectPages, selectedPages.length])
+
+  // Android hands every back press to the registered handler. Surfaces register
+  // through lib/back; when none consumes the press the app backgrounds through the
+  // typed command instead of leaving the webview's own history in charge.
+  useEffect(() => {
+    if (platform !== 'mobile') return
+    return startBackButton()
+  }, [platform])
 
   return (
     <div

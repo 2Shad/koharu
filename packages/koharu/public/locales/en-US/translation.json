@@ -483,6 +483,7 @@
     "projectName": "Project name",
     "projectNamePlaceholder": "My new project",
     "storageHint": "Projects are stored locally in your Documents folder.",
+    "storageHintMobile": "Projects are stored in Koharu's private app storage. They stay after updates but are removed when you uninstall the app.",
     "title": "Projects",
     "yourProjects": "Your projects"
   },

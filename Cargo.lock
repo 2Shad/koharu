@@ -4957,6 +4957,7 @@ version = "0.83.5"
 dependencies = [
  "clap",
  "console",
+ "koharu-android",
  "koharu-app",
  "log",
  "rfd",
@@ -4997,6 +4998,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "koharu-android"
+version = "0.83.5"
+dependencies = [
+ "anyhow",
+ "serde",
+ "tauri",
+ "tauri-plugin",
+]
+
+[[package]]
 name = "koharu-app"
 version = "0.83.5"
 dependencies = [
@@ -5009,6 +5020,7 @@ dependencies = [
  "hayro",
  "image",
  "koharu-agent",
+ "koharu-android",
  "koharu-config",
  "koharu-desktop",
  "koharu-ml",

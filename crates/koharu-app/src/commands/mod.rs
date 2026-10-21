@@ -73,6 +73,7 @@ pub fn bindings() -> tauri_specta::Builder<tauri::DynRuntime> {
             lifecycle::open_project,
             lifecycle::delete_project,
             lifecycle::close_project,
+            lifecycle::background_app,
             lifecycle::import,
             lifecycle::select_page,
             editing::rename_page,

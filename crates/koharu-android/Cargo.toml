@@ -1,0 +1,21 @@
+[package]
+name = "koharu-android"
+description = "Android platform services for Koharu: storage access framework, sharing, Keystore secrets, and background work."
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+readme = { workspace = true }
+keywords = { workspace = true }
+publish = { workspace = true }
+links = "koharu-android"
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+tauri = { workspace = true }
+
+[build-dependencies]
+tauri-plugin = { workspace = true, features = ["build"] }

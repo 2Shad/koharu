@@ -29,10 +29,48 @@ pub fn run() {
     #[cfg(mobile)]
     let _runtime = async_runtime.inner().enter();
 
-    koharu_app::builder()
+    let builder = koharu_app::builder();
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(koharu_android::init());
+    builder
         .runtime(runtime())
-        .run(tauri::generate_context!())
-        .expect("failed to run the application");
+        .build(tauri::generate_context!())
+        .expect("failed to build the application")
+        .run(|handle, event| {
+            #[cfg(mobile)]
+            handle_event(handle, event);
+            #[cfg(not(mobile))]
+            let _ = (handle, event);
+        });
+}
+
+#[cfg(mobile)]
+fn handle_event(handle: &tauri::AppHandle, event: tauri::RunEvent) {
+    use tauri::{Emitter as _, Manager as _};
+
+    let tauri::RunEvent::WindowEvent { event, .. } = event else {
+        return;
+    };
+    match event {
+        tauri::WindowEvent::Resumed => {
+            ::tracing::info!("application resumed");
+            koharu_app::republish_canvas(handle);
+            if let Some(window) = handle.get_webview_window("main")
+                && let Err(error) = window.emit("koharu://resumed", ())
+            {
+                ::tracing::warn!(%error, "failed to announce resume");
+            }
+        }
+        tauri::WindowEvent::Suspended => {
+            ::tracing::info!("application suspended");
+            if let Some(window) = handle.get_webview_window("main")
+                && let Err(error) = window.emit("koharu://suspended", ())
+            {
+                ::tracing::warn!(%error, "failed to announce suspension");
+            }
+        }
+        _ => {}
+    }
 }
 
 #[cfg(desktop)]

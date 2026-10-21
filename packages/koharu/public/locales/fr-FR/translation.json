@@ -483,6 +483,7 @@
     "projectName": "Nom du projet",
     "projectNamePlaceholder": "Mon nouveau projet",
     "storageHint": "Les projets sont stockés localement dans votre dossier Documents.",
+    "storageHintMobile": "Les projets sont stockés dans l’espace privé de l’application Koharu. Ils sont conservés lors des mises à jour, mais supprimés si vous désinstallez l’application.",
     "title": "Projets",
     "yourProjects": "Vos projets"
   },

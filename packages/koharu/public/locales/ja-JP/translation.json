@@ -483,6 +483,7 @@
     "projectName": "プロジェクト名",
     "projectNamePlaceholder": "新しいプロジェクト",
     "storageHint": "プロジェクトは「ドキュメント」フォルダーにローカル保存されます。",
+    "storageHintMobile": "プロジェクトは Koharu の非公開アプリ領域に保存されます。更新後も残りますが、アプリをアンインストールすると削除されます。",
     "title": "プロジェクト",
     "yourProjects": "プロジェクト一覧"
   },

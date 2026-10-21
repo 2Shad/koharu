@@ -117,6 +117,7 @@ pub(crate) async fn process(
     let task_handle = handle.clone();
     let inpainting_mask = processing.inpainting_mask.lock().take();
     drop(tokio::spawn(async move {
+        let _work = crate::background::acquire(&task_handle, "", "");
         let progress = Arc::new(Mutex::new((0_usize, 0_usize)));
         let progress_handle = task_handle.clone();
         let mut request = koharu_pipeline::Request {
@@ -152,6 +153,13 @@ pub(crate) async fn process(
                 Progress::Running { .. } => None,
             };
             if let Some((completed, total, page, stage, model)) = update {
+                crate::background::update(
+                    &progress_handle,
+                    "",
+                    model.as_deref().unwrap_or(""),
+                    u32::try_from(completed).unwrap_or(u32::MAX),
+                    u32::try_from(total).unwrap_or(u32::MAX),
+                );
                 let job = {
                     let processing = progress_handle.state::<Processing>();
                     let mut jobs = processing.jobs.lock();
