@@ -6,14 +6,13 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use strum::{EnumMessage as _, IntoEnumIterator as _};
 use tauri::{AppHandle, Manager as _, State, WebviewWindow, ipc::Channel};
-use tauri_runtime_cef::CefRuntime;
 use walkdir::WalkDir;
 
 use super::{
     ChannelExt as _, Error,
     agent::AgentState,
     canvas::CanvasChannel,
-    import,
+    dialogs, import,
     preferences::Preferences,
     processing::{Job, JobChannel, Processing},
     project::{
@@ -21,8 +20,16 @@ use super::{
     },
 };
 
+#[derive(Clone, Copy, Debug, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum Platform {
+    Desktop,
+    Mobile,
+}
+
 #[derive(Clone, Debug, Serialize, Type)]
 pub struct StartupState {
+    pub platform: Platform,
     pub preferences: Preferences,
     pub jobs: Vec<Job>,
     pub canvas: CanvasState,
@@ -150,7 +157,7 @@ impl From<koharu_pipeline::ResourceSnapshot> for ModelResources {
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn subscribe(
-    handle: AppHandle<CefRuntime>,
+    handle: AppHandle,
     on_canvas: Channel<CanvasState>,
     on_job: Channel<Job>,
     on_download: Channel<Download>,
@@ -168,6 +175,11 @@ pub(crate) async fn subscribe(
     let canvas = handle.state::<Desktop>().canvas_state();
     let preferences = Preferences::load()?;
     Ok(StartupState {
+        platform: if cfg!(mobile) {
+            Platform::Mobile
+        } else {
+            Platform::Desktop
+        },
         preferences,
         jobs: handle
             .state::<Processing>()
@@ -180,7 +192,7 @@ pub(crate) async fn subscribe(
     })
 }
 
-async fn replace_project(handle: &AppHandle<CefRuntime>, opened: Project) -> Result<()> {
+async fn replace_project(handle: &AppHandle, opened: Project) -> Result<()> {
     let snapshot = opened.snapshot();
     let page = opened.active_page();
     let info = opened.info();
@@ -260,7 +272,7 @@ pub(crate) async fn list_projects(
 #[specta::specta]
 pub(crate) async fn create_project(
     name: String,
-    handle: AppHandle<CefRuntime>,
+    handle: AppHandle,
 ) -> std::result::Result<(), Error> {
     let library = handle.state::<ProjectLibrary>().inner().clone();
     let opened = library.create(&name).await?;
@@ -272,7 +284,7 @@ pub(crate) async fn create_project(
 #[specta::specta]
 pub(crate) async fn open_project(
     name: String,
-    handle: AppHandle<CefRuntime>,
+    handle: AppHandle,
 ) -> std::result::Result<(), Error> {
     let library = handle.state::<ProjectLibrary>().inner().clone();
     let opened = library.open(&name).await?;
@@ -282,7 +294,7 @@ pub(crate) async fn open_project(
 
 #[tauri::command]
 #[specta::specta]
-pub(crate) async fn close_project(handle: AppHandle<CefRuntime>) -> std::result::Result<(), Error> {
+pub(crate) async fn close_project(handle: AppHandle) -> std::result::Result<(), Error> {
     close_current_project(&handle).await?;
     Ok(())
 }
@@ -291,7 +303,7 @@ pub(crate) async fn close_project(handle: AppHandle<CefRuntime>) -> std::result:
 #[specta::specta]
 pub(crate) async fn delete_project(
     name: String,
-    handle: AppHandle<CefRuntime>,
+    handle: AppHandle,
 ) -> std::result::Result<(), Error> {
     let active = handle
         .state::<CurrentProject>()
@@ -310,7 +322,7 @@ pub(crate) async fn delete_project(
     Ok(())
 }
 
-async fn close_current_project(handle: &AppHandle<CefRuntime>) -> Result<()> {
+async fn close_current_project(handle: &AppHandle) -> Result<()> {
     handle.state::<AgentState>().reset().await;
     let processing = handle.state::<Processing>();
     for stop in processing.stops.lock().values() {
@@ -336,7 +348,7 @@ async fn close_current_project(handle: &AppHandle<CefRuntime>) -> Result<()> {
 #[specta::specta]
 pub(crate) async fn import(
     source: PageImportSource,
-    window: WebviewWindow<CefRuntime>,
+    window: WebviewWindow,
     desktop: State<'_, Desktop>,
     project: State<'_, CurrentProject>,
     processing: State<'_, Processing>,
@@ -347,39 +359,35 @@ pub(crate) async fn import(
     }
     let extensions = import::Format::iter()
         .flat_map(|format| format.get_serializations())
+        .copied()
         .collect::<Vec<_>>();
-    let dialog = rfd::AsyncFileDialog::new()
-        .add_filter("Images, archives, and PDF", &extensions)
-        .set_parent(&window);
-    let files = match source {
-        PageImportSource::Files => dialog.pick_files().await.map(|files| {
-            files
-                .into_iter()
-                .map(|file| file.path().to_owned())
-                .collect::<Vec<_>>()
-        }),
-        PageImportSource::Folder => dialog.pick_folder().await.map(|folder| {
-            WalkDir::new(folder.path())
-                .follow_links(false)
-                .into_iter()
-                .filter_map(|entry| match entry {
-                    Ok(entry) if entry.file_type().is_file() => Some(entry.into_path()),
-                    Ok(_) => None,
-                    Err(error) => {
-                        tracing::warn!(%error, "could not inspect an import directory entry");
-                        None
-                    }
-                })
-                .filter(|path| {
-                    path.extension()
-                        .and_then(|extension| extension.to_str())
-                        .is_some_and(|extension| extension.parse::<import::Format>().is_ok())
-                })
-                .collect::<Vec<_>>()
-        }),
-    };
-    let Some(files) = files else {
+    let Some(picked) = dialogs::pick_import(&window, source, &extensions).await? else {
         return Ok(());
+    };
+    let files = match source {
+        PageImportSource::Files => picked,
+        PageImportSource::Folder => picked
+            .into_iter()
+            .flat_map(|folder| {
+                WalkDir::new(folder)
+                    .follow_links(false)
+                    .into_iter()
+                    .filter_map(|entry| match entry {
+                        Ok(entry) if entry.file_type().is_file() => Some(entry.into_path()),
+                        Ok(_) => None,
+                        Err(error) => {
+                            tracing::warn!(%error, "could not inspect an import directory entry");
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .filter(|path| {
+                path.extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension.parse::<import::Format>().is_ok())
+            })
+            .collect::<Vec<_>>(),
     };
     if files.is_empty() {
         return Err(anyhow::anyhow!("no supported images were found in the selection").into());

@@ -393,6 +393,8 @@ export type PipelineConfig = {
 	processor: ProcessorConfig,
 };
 
+export type Platform = "desktop" | "mobile";
+
 export type Point = {
 	x: number,
 	y: number,
@@ -469,6 +471,7 @@ export type SourceText = {
 export type Stage = "detection" | "ocr" | "translation" | "inpainting";
 
 export type StartupState = {
+	platform: Platform,
 	preferences: Preferences,
 	jobs: Job[],
 	canvas: CanvasState,

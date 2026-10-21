@@ -121,10 +121,11 @@ export function Providers({ children }: { children: ReactNode }) {
 
 function StartupBoundary({ children }: { children: ReactNode }) {
   const initialized = useKoharuStore((state) => state.initialized)
+  const platform = useKoharuStore((state) => state.platform)
   return initialized ? (
     <>
       {children}
-      <Updater />
+      {platform === 'desktop' && <Updater />}
     </>
   ) : (
     <StartupView />

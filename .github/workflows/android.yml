@@ -1,0 +1,75 @@
+name: Android
+
+on:
+  push:
+    branches: ['android']
+    tags: ['android-m0-*']
+  pull_request:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  NDK_VERSION: 27.2.12479018
+  # Drop native debug sections from the preview APK: 1.6 GB becomes a practical download.
+  # The build is still debuggable (WebView devtools, cleartext); symbols are unavailable.
+  CARGO_PROFILE_DEV_DEBUG: '0'
+
+jobs:
+  build:
+    name: Android arm64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-36 build-tools;36.0.0 ndk;27.2.12479018'
+      - name: Resolve the NDK
+        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: koharu-android
+      - name: Install Rust targets
+        run: rustup target add aarch64-linux-android wasm32-unknown-unknown
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --version 4.1.2 --locked
+      - uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
+      - run: bun install
+      - name: Check the Android Rust graph
+        run: cargo ndk -t arm64-v8a check -p koharu
+      - name: Generate the Android project
+        working-directory: crates/koharu
+        run: cargo tauri android init
+      - name: Build the debug APK
+        working-directory: crates/koharu
+        run: cargo tauri android build --debug --target aarch64
+      - uses: actions/upload-artifact@v7
+        with:
+          name: koharu-android-debug
+          path: crates/koharu/gen/android/app/build/outputs/apk/**/*.apk
+          retention-days: 3
+      - name: Publish the preview release
+        if: startsWith(github.ref, 'refs/tags/android-m0-')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Koharu Android M0 preview
+          prerelease: true
+          body: |
+            Debug `arm64-v8a` build for the M0 hand-off (minSdk 31).
+
+            Install with `adb install -r app-universal-debug.apk`, or copy the APK to the
+            device and open it. The APK is signed with the CI debug key, so installing a
+            newer preview over this one may require uninstalling it first.
+
+            Native debug sections are dropped to keep the download small; WebView devtools
+            remain available in the debug build.
+          files: crates/koharu/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk

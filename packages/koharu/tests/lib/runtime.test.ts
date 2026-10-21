@@ -65,6 +65,7 @@ beforeEach(() => {
 })
 
 const startupState = (): StartupState => ({
+  platform: 'desktop',
   preferences,
   jobs: [],
   canvas: {

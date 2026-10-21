@@ -1,6 +1,10 @@
 mod rewrite;
 
-use std::{fs, io::Write, path::Path};
+use std::{
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result};
 
@@ -48,8 +52,7 @@ impl Generator {
     }
 
     pub fn generate(self) -> Result<String> {
-        let bindings = self
-            .builder
+        let bindings = target_clang_args(self.builder)?
             // The rewrite pass owns formatting with its matching syn/prettyplease pair.
             .formatter(bindgen::Formatter::None)
             .generate()
@@ -80,4 +83,41 @@ fn bindings_to_string(bindings: &bindgen::Bindings) -> Result<String> {
     let mut bytes = Vec::new();
     bindings.write(Box::new(&mut bytes) as Box<dyn Write>)?;
     String::from_utf8(bytes).context("bindgen emitted non-UTF-8 Rust source")
+}
+
+/// Points libclang at the Android NDK sysroot.
+///
+/// Bindgen otherwise resolves the host's C headers, whose glibc-internal includes do not
+/// exist in the target sysroot. The NDK clang driver would find its own sysroot, but libclang
+/// has no such relationship with the NDK installation.
+fn target_clang_args(builder: bindgen::Builder) -> Result<bindgen::Builder> {
+    let target = std::env::var("TARGET").context("Cargo did not set TARGET")?;
+    if !target.contains("android") {
+        return Ok(builder);
+    }
+
+    let ndk = ["ANDROID_NDK_HOME", "ANDROID_NDK_ROOT", "NDK_HOME"]
+        .into_iter()
+        .find_map(std::env::var_os)
+        .map(PathBuf::from)
+        .context("set ANDROID_NDK_HOME to generate bindings for Android")?;
+    let sysroot = android_sysroot(&ndk)?;
+    Ok(builder
+        .clang_arg(format!("--target={target}"))
+        .clang_arg(format!("--sysroot={}", sysroot.display())))
+}
+
+fn android_sysroot(ndk: &Path) -> Result<PathBuf> {
+    let prebuilt = ndk.join("toolchains/llvm/prebuilt");
+    let mut hosts = fs::read_dir(&prebuilt)
+        .with_context(|| format!("failed to read {}", prebuilt.display()))?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path().join("sysroot"))
+        .filter(|sysroot| sysroot.is_dir())
+        .collect::<Vec<_>>();
+    hosts.sort();
+    hosts
+        .into_iter()
+        .next()
+        .with_context(|| format!("no Android NDK sysroot found in {}", prebuilt.display()))
 }

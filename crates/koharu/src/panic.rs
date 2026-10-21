@@ -22,6 +22,7 @@ pub fn install() {
             client.flush(Some(Duration::from_secs(2)));
         }
 
+        #[cfg(desktop)]
         rfd::MessageDialog::new()
             .set_level(rfd::MessageLevel::Error)
             .set_title("Koharu has stopped")

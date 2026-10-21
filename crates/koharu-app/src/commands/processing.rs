@@ -7,10 +7,10 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::{AppHandle, Manager as _, State, ipc::Channel};
-use tauri_runtime_cef::CefRuntime;
 use uuid::Uuid;
 
 use super::{ChannelExt as _, Error, canvas::CanvasChannel, project::CurrentProject};
+use crate::models::Models;
 use koharu_desktop::Desktop;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, Type)]
@@ -75,12 +75,13 @@ pub(crate) struct JobChannel {
 #[specta::specta]
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn process(
-    handle: AppHandle<CefRuntime>,
+    handle: AppHandle,
     scope: koharu_pipeline::Scope,
     operation: koharu_pipeline::Operation,
     project: State<'_, CurrentProject>,
     processing: State<'_, Processing>,
     job_channel: State<'_, JobChannel>,
+    models: State<'_, Models>,
 ) -> std::result::Result<JobId, Error> {
     let snapshot = project
         .project
@@ -89,6 +90,8 @@ pub(crate) async fn process(
         .as_ref()
         .context("no project is open")?
         .snapshot();
+
+    let pipeline = models.pipeline().await?;
     let id = JobId::new();
     let stop = StopToken::default();
     {
@@ -111,7 +114,6 @@ pub(crate) async fn process(
     processing.jobs.lock().insert(id, job.clone());
     job_channel.channel.publish(job);
 
-    let pipeline = handle.state::<koharu_pipeline::Pipeline>().inner().clone();
     let task_handle = handle.clone();
     let inpainting_mask = processing.inpainting_mask.lock().take();
     drop(tokio::spawn(async move {
@@ -169,7 +171,7 @@ pub(crate) async fn process(
         }));
 
         struct PipelineCommitter {
-            handle: AppHandle<CefRuntime>,
+            handle: AppHandle,
         }
 
         #[async_trait::async_trait]

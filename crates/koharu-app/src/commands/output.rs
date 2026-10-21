@@ -13,9 +13,8 @@ use serde::Deserialize;
 use specta::Type;
 use std::{io::Write as _, sync::Arc};
 use tauri::{State, WebviewWindow, ipc::IpcResponse};
-use tauri_runtime_cef::CefRuntime;
 
-use super::{Error, project::CurrentProject};
+use super::{Error, dialogs, project::CurrentProject};
 use koharu_desktop::Desktop;
 
 const THUMBNAIL_EDGE: u32 = 128;
@@ -41,7 +40,7 @@ pub enum ExportFormat {
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn export(
-    window: WebviewWindow<CefRuntime>,
+    window: WebviewWindow,
     format: ExportFormat,
     project: State<'_, CurrentProject>,
     desktop: State<'_, Desktop>,
@@ -55,18 +54,19 @@ pub(crate) async fn export(
     if pages.is_empty() {
         return Err(anyhow::anyhow!("there are no pages to export").into());
     }
-    let dialog = rfd::AsyncFileDialog::new().set_parent(&window);
     let destination = match format {
-        ExportFormat::Png | ExportFormat::Psd => dialog.pick_folder().await,
+        ExportFormat::Png | ExportFormat::Psd => dialogs::pick_export(&window, None, None).await?,
         ExportFormat::Cbz => {
-            dialog
-                .add_filter("Comic Book Archive", &["cbz"])
-                .set_file_name(format!("{name}.cbz"))
-                .save_file()
-                .await
+            let file_name = format!("{name}.cbz");
+            dialogs::pick_export(
+                &window,
+                Some(&file_name),
+                Some(("Comic Book Archive", &["cbz"])),
+            )
+            .await?
         }
     };
-    let Some(destination) = destination.map(|destination| destination.path().to_owned()) else {
+    let Some(destination) = destination else {
         return Ok(());
     };
     let renderer = desktop.renderer();

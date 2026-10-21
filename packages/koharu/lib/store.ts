@@ -14,6 +14,7 @@ import type {
   StartupState,
   ModelResources,
   PageSize,
+  Platform,
 } from '@koharu/bridge/protocol'
 import { toast } from '@koharu/ui/components/toast'
 
@@ -41,6 +42,7 @@ export const pipelineStages: readonly Stage[] = ['detection', 'ocr', 'translatio
 
 interface KoharuStore {
   initialized: boolean
+  platform: Platform
   preferences: Preferences | null
   translationModels: Model[]
   resources: ModelResources | null
@@ -89,6 +91,7 @@ export const defaultShortcuts: Shortcuts = {
 
 export const useKoharuStore = create<KoharuStore>()((set) => ({
   initialized: false,
+  platform: 'desktop',
   preferences: null,
   translationModels: [],
   resources: null,
@@ -140,6 +143,7 @@ export const useKoharuStore = create<KoharuStore>()((set) => ({
 export function receiveStartupState(state: StartupState): void {
   useKoharuStore.setState({
     initialized: true,
+    platform: state.platform,
     preferences: state.preferences,
     jobs: byId(state.jobs),
     ...canvasSnapshot(state.canvas),

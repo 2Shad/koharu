@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, ensure};
 use atomicwrites::{AtomicFile, OverwriteBehavior};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -35,6 +35,7 @@ const CONFIG_DIRECTORY: &str = ".koharu";
 const CONFIG_FILE: &str = "config.toml";
 
 static MANAGER: OnceLock<Result<Arc<Manager>, String>> = OnceLock::new();
+static CONFIG_PATH: OnceLock<PathBuf> = OnceLock::new();
 
 /// Monotonically increasing version of a live configuration value.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -370,10 +371,49 @@ impl Manager {
     }
 }
 
-/// Returns the shared Koharu configuration path: `~/.koharu/config.toml`.
+/// Returns the shared Koharu configuration path: `~/.koharu/config.toml` unless
+/// [`configure`] has selected one.
 pub fn path() -> Result<PathBuf> {
+    if let Some(path) = CONFIG_PATH.get() {
+        return Ok(path.clone());
+    }
     let home = dirs::home_dir().context("could not determine the home directory")?;
     Ok(home.join(CONFIG_DIRECTORY).join(CONFIG_FILE))
+}
+
+/// Selects the configuration file before the first configuration value is loaded.
+pub fn configure(path: impl Into<PathBuf>) -> Result<()> {
+    let requested = path.into();
+    ensure!(
+        requested.is_absolute(),
+        "configuration path must be absolute: {}",
+        requested.display()
+    );
+    ensure!(
+        MANAGER.get().is_none(),
+        "configuration was loaded before its path was configured"
+    );
+
+    if let Some(active) = CONFIG_PATH.get() {
+        ensure!(
+            active == &requested,
+            "configuration is already {}",
+            active.display()
+        );
+        return Ok(());
+    }
+
+    if let Err(requested) = CONFIG_PATH.set(requested) {
+        let active = CONFIG_PATH
+            .get()
+            .context("configuration path was configured concurrently without a value")?;
+        ensure!(
+            active == &requested,
+            "configuration is already {}",
+            active.display()
+        );
+    }
+    Ok(())
 }
 
 /// Load or retrieve a live, process-wide top-level configuration section.

@@ -181,10 +181,7 @@ pub(crate) struct ProjectLibrary {
 }
 
 impl ProjectLibrary {
-    pub(crate) fn new() -> Result<Self> {
-        let root = dirs::document_dir()
-            .context("the Documents directory is unavailable")?
-            .join("Koharu");
+    pub(crate) fn new(root: PathBuf) -> Result<Self> {
         std::fs::create_dir_all(&root)
             .with_context(|| format!("failed to create {}", root.display()))?;
         Ok(Self { root })
