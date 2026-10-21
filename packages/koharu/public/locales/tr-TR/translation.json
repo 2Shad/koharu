@@ -483,6 +483,7 @@
     "projectName": "Proje adı",
     "projectNamePlaceholder": "Yeni projem",
     "storageHint": "Projeler Belgeler klasörünüzde yerel olarak saklanır.",
+    "storageHintMobile": "Projeler Koharu'nun özel uygulama depolamasında tutulur. Güncellemelerden sonra korunur, ancak uygulamayı kaldırdığınızda silinir.",
     "title": "Projeler",
     "yourProjects": "Projeleriniz"
   },

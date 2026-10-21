@@ -2,7 +2,12 @@ use anyhow::{Context as _, Result};
 use tauri::{AppHandle, Manager as _, WindowEvent};
 use tokio::sync::Mutex;
 
+#[cfg(target_os = "android")]
+use koharu_secrets::ExposeSecret as _;
+
+use crate::background::BackgroundWork;
 use crate::commands::{
+    ChannelExt as _,
     agent::AgentState,
     canvas::CanvasChannel,
     lifecycle::{
@@ -83,6 +88,17 @@ pub fn builder() -> tauri::Builder {
             application.manage(Models::new(handle.clone()));
             application.manage(koharu_desktop::Desktop::new()?);
             application.manage(AgentState::new(handle.clone())?);
+            application.manage(BackgroundWork::new(&handle));
+
+            #[cfg(target_os = "android")]
+            {
+                let android = application
+                    .try_state::<koharu_android::Android>()
+                    .context("the Android platform plugin state is unavailable")?
+                    .inner()
+                    .clone();
+                koharu_secrets::install(std::sync::Arc::new(AndroidSecrets(android)))?;
+            }
 
             let window_config = application
                 .config()
@@ -103,40 +119,61 @@ pub fn builder() -> tauri::Builder {
             let mut downloads = koharu_runtime::download::subscribe();
             let download_handle = handle.clone();
             drop(tauri::async_runtime::spawn(async move {
+                let mut work = std::collections::HashMap::new();
                 loop {
                     match downloads.recv().await {
                         Ok(event) => {
                             let download = match event {
-                                koharu_runtime::download::Event::Started { id, name } => Download {
-                                    id,
-                                    state: DownloadState::Running,
-                                    name: Some(name),
-                                    completed: 0,
-                                    total: 0,
-                                    error: None,
-                                },
+                                koharu_runtime::download::Event::Started { id, name } => {
+                                    work.insert(
+                                        id,
+                                        crate::background::acquire(&download_handle, "", &name),
+                                    );
+                                    Download {
+                                        id,
+                                        state: DownloadState::Running,
+                                        name: Some(name),
+                                        completed: 0,
+                                        total: 0,
+                                        error: None,
+                                    }
+                                }
                                 koharu_runtime::download::Event::Progress {
                                     id,
                                     name,
                                     completed,
                                     total,
-                                } => Download {
-                                    id,
-                                    state: DownloadState::Running,
-                                    name: Some(name),
-                                    completed,
-                                    total,
-                                    error: None,
-                                },
-                                koharu_runtime::download::Event::Finished { id } => Download {
-                                    id,
-                                    state: DownloadState::Finished,
-                                    name: None,
-                                    completed: 0,
-                                    total: 0,
-                                    error: None,
-                                },
+                                } => {
+                                    if let Some(work) = work.get(&id) {
+                                        work.progress(
+                                            "",
+                                            &name,
+                                            u32::try_from(completed).unwrap_or(u32::MAX),
+                                            u32::try_from(total).unwrap_or(u32::MAX),
+                                        );
+                                    }
+                                    Download {
+                                        id,
+                                        state: DownloadState::Running,
+                                        name: Some(name),
+                                        completed,
+                                        total,
+                                        error: None,
+                                    }
+                                }
+                                koharu_runtime::download::Event::Finished { id } => {
+                                    work.remove(&id);
+                                    Download {
+                                        id,
+                                        state: DownloadState::Finished,
+                                        name: None,
+                                        completed: 0,
+                                        total: 0,
+                                        error: None,
+                                    }
+                                }
                                 koharu_runtime::download::Event::Failed { id, name, error } => {
+                                    work.remove(&id);
                                     Download {
                                         id,
                                         state: DownloadState::Failed,
@@ -181,6 +218,12 @@ pub fn builder() -> tauri::Builder {
         })
 }
 
+/// Republishes the current canvas so a resumed webview can restore its surface.
+pub fn republish_canvas(handle: &AppHandle) {
+    let canvas = handle.state::<koharu_desktop::Desktop>().canvas_state();
+    handle.state::<CanvasChannel>().channel.publish(canvas);
+}
+
 /// Resolves the directory that stores projects.
 ///
 /// Desktop keeps the user-visible `Documents/Koharu` library. Mobile uses application-private
@@ -196,5 +239,27 @@ fn project_library_root(handle: &AppHandle) -> Result<std::path::PathBuf> {
     #[cfg(mobile)]
     {
         Ok(handle.path().app_data_dir()?.join("library"))
+    }
+}
+
+/// Credential store backed by the Android Keystore through the platform plugin.
+#[cfg(target_os = "android")]
+struct AndroidSecrets(koharu_android::Android);
+
+#[cfg(target_os = "android")]
+impl koharu_secrets::Backend for AndroidSecrets {
+    fn get(&self, key: &str) -> Result<Option<koharu_secrets::SecretString>> {
+        Ok(self
+            .0
+            .secret_get(key)?
+            .map(koharu_secrets::SecretString::from))
+    }
+
+    fn set(&self, key: &str, secret: &koharu_secrets::SecretString) -> Result<()> {
+        self.0.secret_set(key, secret.expose_secret())
+    }
+
+    fn delete(&self, key: &str) -> Result<()> {
+        self.0.secret_delete(key)
     }
 }

@@ -483,6 +483,7 @@
     "projectName": "项目名称",
     "projectNamePlaceholder": "我的新项目",
     "storageHint": "项目存储在本地“文档”文件夹中。",
+    "storageHintMobile": "项目存储在 Koharu 的私有应用空间中。更新后会保留，但卸载应用时会被删除。",
     "title": "项目",
     "yourProjects": "你的项目"
   },

@@ -11,7 +11,11 @@ use koharu_scene::{AssetRole, EntityId, Snapshot};
 use rayon::prelude::*;
 use serde::Deserialize;
 use specta::Type;
-use std::{io::Write as _, sync::Arc};
+use std::{
+    io::Write as _,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tauri::{State, WebviewWindow, ipc::IpcResponse};
 
 use super::{Error, dialogs, project::CurrentProject};
@@ -55,12 +59,15 @@ pub(crate) async fn export(
         return Err(anyhow::anyhow!("there are no pages to export").into());
     }
     let destination = match format {
-        ExportFormat::Png | ExportFormat::Psd => dialogs::pick_export(&window, None, None).await?,
+        ExportFormat::Png | ExportFormat::Psd => {
+            dialogs::pick_export(&window, &name, None, None).await?
+        }
         ExportFormat::Cbz => {
             let file_name = format!("{name}.cbz");
             dialogs::pick_export(
                 &window,
-                Some(&file_name),
+                &name,
+                Some((&file_name, "application/vnd.comicbook+zip")),
                 Some(("Comic Book Archive", &["cbz"])),
             )
             .await?
@@ -72,9 +79,9 @@ pub(crate) async fn export(
     let renderer = desktop.renderer();
     let rasterizer = desktop.rasterizer().await?;
     let frames = try_join_all(pages.iter().map(|&page| renderer.render(&snapshot, page))).await?;
-    let (extension, images) = match format {
+    let images = match format {
         ExportFormat::Png | ExportFormat::Cbz => {
-            let images = tokio_rayon::spawn(move || {
+            tokio_rayon::spawn(move || {
                 frames
                     .par_iter()
                     .map(|frame| -> Result<_> {
@@ -97,63 +104,191 @@ pub(crate) async fn export(
                     })
                     .collect::<Result<Vec<_>>>()
             })
-            .await?;
-            ("png", images)
+            .await?
         }
         ExportFormat::Psd => {
             let options = PsdExportOptions::default();
-            let images = try_join_all(
+            try_join_all(
                 frames
                     .iter()
                     .map(|frame| export_page(Arc::clone(&rasterizer), &snapshot, frame, &options)),
             )
-            .await?;
-            ("psd", images)
+            .await?
         }
     };
-    tokio_rayon::spawn(move || -> Result<()> {
-        let mut archive = if matches!(format, ExportFormat::Cbz) {
-            let directory = destination.parent().context("archive path has no parent")?;
-            Some(zip::ZipWriter::new(tempfile::NamedTempFile::new_in(
-                directory,
-            )?))
-        } else {
-            None
-        };
-        let width = pages.len().to_string().len().max(4);
-        // Async preparation and indexed encoding both preserve project order.
-        for (index, (page_id, bytes)) in pages.into_iter().zip(images).enumerate() {
-            let page = snapshot.page(page_id)?.page()?;
-            let name = page
-                .label
-                .trim()
-                .trim_end_matches(|character: char| character == '.' || character.is_whitespace());
-            let name = name
-                .rsplit_once('.')
-                .map_or(name, |(stem, _)| stem)
-                .replace(['<', '>', ':', '"', '/', '\\', '|', '?', '*'], "_");
-            let name = format!(
-                "{:0width$}_{}.{extension}",
-                index + 1,
-                if name.is_empty() { "page" } else { &name }
-            );
-            if let Some(archive) = &mut archive {
-                // PNG data is already compressed.
-                let options = zip::write::SimpleFileOptions::default()
-                    .compression_method(zip::CompressionMethod::Stored);
-                archive.start_file(name, options)?;
-                archive.write_all(&bytes)?;
-            } else {
-                std::fs::write(destination.join(name), bytes)?;
-            }
-        }
-        if let Some(archive) = archive {
-            archive.finish()?.persist(destination)?;
-        }
-        Ok(())
-    })
-    .await?;
+    store(&window, &name, destination, format, pages, snapshot, images).await?;
     Ok(())
+}
+
+/// Writes the encoded pages to the destination.
+///
+/// Android destinations are content URIs, so the files are staged in the app cache and handed to
+/// the platform plugin; desktop destinations are direct paths.
+#[cfg(desktop)]
+async fn store(
+    _window: &WebviewWindow,
+    _project_name: &str,
+    destination: dialogs::Destination,
+    format: ExportFormat,
+    pages: Vec<EntityId>,
+    snapshot: Snapshot,
+    images: Vec<Vec<u8>>,
+) -> Result<()> {
+    match destination {
+        dialogs::Destination::Directory(directory) => {
+            tokio_rayon::spawn(move || {
+                produce(&directory, format, None, &pages, &snapshot, images).map(drop)
+            })
+            .await?;
+        }
+        dialogs::Destination::File(path) => {
+            tokio_rayon::spawn(move || -> Result<()> {
+                let directory = path.parent().context("archive path has no parent")?;
+                let file_name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .context("archive path has no file name")?;
+                let staging = tempfile::tempdir_in(directory)?;
+                let produced = produce(
+                    staging.path(),
+                    format,
+                    Some(file_name),
+                    &pages,
+                    &snapshot,
+                    images,
+                )?;
+                std::fs::rename(&produced[0], &path)?;
+                Ok(())
+            })
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "android")]
+async fn store(
+    window: &WebviewWindow,
+    project_name: &str,
+    destination: dialogs::Destination,
+    format: ExportFormat,
+    pages: Vec<EntityId>,
+    snapshot: Snapshot,
+    images: Vec<Vec<u8>>,
+) -> Result<()> {
+    use tauri::Manager as _;
+
+    let staging = window
+        .path()
+        .app_cache_dir()?
+        .join(format!("export-{}", uuid::Uuid::new_v4()));
+    let result = async {
+        let (target, archive) = match &destination {
+            dialogs::Destination::Tree(uri) => {
+                (koharu_android::ExportTarget::Directory(uri.clone()), None)
+            }
+            dialogs::Destination::Document(uri) => (
+                koharu_android::ExportTarget::File(uri.clone()),
+                Some(format!("{project_name}.cbz")),
+            ),
+        };
+        let directory = staging.clone();
+        let produced = tokio_rayon::spawn(move || {
+            produce(
+                &directory,
+                format,
+                archive.as_deref(),
+                &pages,
+                &snapshot,
+                images,
+            )
+        })
+        .await?;
+        let android = window.state::<koharu_android::Android>().inner().clone();
+        android.publish_export(&target, produced).await?;
+        Ok(())
+    }
+    .await;
+    let _ = std::fs::remove_dir_all(&staging);
+    result
+}
+
+#[cfg(all(mobile, not(target_os = "android")))]
+async fn store(
+    _window: &WebviewWindow,
+    _project_name: &str,
+    _destination: dialogs::Destination,
+    _format: ExportFormat,
+    _pages: Vec<EntityId>,
+    _snapshot: Snapshot,
+    _images: Vec<Vec<u8>>,
+) -> Result<()> {
+    anyhow::bail!("export is unavailable on this platform")
+}
+
+/// Writes the encoded pages into `directory`, as one file per page or as one archive when
+/// `archive_name` is set. Returns the files it created.
+fn produce(
+    directory: &Path,
+    format: ExportFormat,
+    archive_name: Option<&str>,
+    pages: &[EntityId],
+    snapshot: &Snapshot,
+    images: Vec<Vec<u8>>,
+) -> Result<Vec<PathBuf>> {
+    std::fs::create_dir_all(directory)?;
+    let extension = match format {
+        ExportFormat::Psd => "psd",
+        ExportFormat::Png | ExportFormat::Cbz => "png",
+    };
+    let width = pages.len().to_string().len().max(4);
+    // Async preparation and indexed encoding both preserve project order.
+    let mut produced = Vec::with_capacity(archive_name.map_or(pages.len(), |_| 1));
+    if let Some(archive_name) = archive_name {
+        let path = directory.join(archive_name);
+        let mut archive = zip::ZipWriter::new(std::fs::File::create(&path)?);
+        for (index, (page_id, bytes)) in pages.iter().zip(images).enumerate() {
+            let name = export_name(snapshot, *page_id, index, width, extension)?;
+            // PNG data is already compressed.
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+            archive.start_file(name, options)?;
+            archive.write_all(&bytes)?;
+        }
+        archive.finish()?;
+        produced.push(path);
+    } else {
+        for (index, (page_id, bytes)) in pages.iter().zip(images).enumerate() {
+            let name = export_name(snapshot, *page_id, index, width, extension)?;
+            let path = directory.join(name);
+            std::fs::write(&path, bytes)?;
+            produced.push(path);
+        }
+    }
+    Ok(produced)
+}
+
+fn export_name(
+    snapshot: &Snapshot,
+    page_id: EntityId,
+    index: usize,
+    width: usize,
+    extension: &str,
+) -> Result<String> {
+    let page = snapshot.page(page_id)?.page()?;
+    let name = page
+        .label
+        .trim()
+        .trim_end_matches(|character: char| character == '.' || character.is_whitespace());
+    let name = name
+        .rsplit_once('.')
+        .map_or(name, |(stem, _)| stem)
+        .replace(['<', '>', ':', '"', '/', '\\', '|', '?', '*'], "_");
+    Ok(format!(
+        "{:0width$}_{}.{extension}",
+        index + 1,
+        if name.is_empty() { "page" } else { &name }
+    ))
 }
 
 #[tauri::command]

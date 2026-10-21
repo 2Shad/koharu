@@ -8,12 +8,13 @@ what "done" means.
 - **Baseline:** `main` @ `88d07ef0`, workspace version `0.83.5`, Tauri `3.0.0-alpha.5`
   (git rev `40a2d81d97f5c950e892fa7a6ce8b03064410c4d`), CEF runtime on desktop.
 - **Status date:** 2026-10-21
-- **Current state:** M0 build verification is done on the emulator — the debug APK builds,
-  installs, boots, and renders the editor shell (StartView and Settings), so the `android`
-  branch carries working code. Preview builds are tag-driven: pushing an `android-m0-*` tag
-  makes CI publish the debug APK as a GitHub prerelease (no CI run has happened yet).
-  Open: install and boot on a physical phone, rerun the WebGPU probe on real hardware.
-  M1 and later are not started.
+- **Current state:** M1 platform services have landed on the `android` branch: the
+  `koharu-android` plugin crate (SAF import/export, share sheet, Keystore, foreground
+  service, back button), the `koharu-app` picker/export abstraction, installable secrets
+  backends, foreground work tracking, and the mobile back-button registry. The Android
+  Rust graph and the debug APK both build. Device verification of the M1 exit criteria is
+  open, and M2 is not started. The port targets Android and desktop; a non-Android mobile
+  build compiles with the pre-M1 "picker unavailable" behavior but is not supported.
 
 ## How to use this document
 
@@ -81,7 +82,7 @@ Rules that apply to every session:
 | Selection handles | `components/editor/SelectionControls.tsx` | 14 px targets, 8 handles + rotate. |
 | Page rail | `components/editor/PageRail.tsx` (581 lines) | HTML5 drag reorder, hover-only actions, Shift/Ctrl multi-select, double-click rename. |
 | Inspector | `components/editor/Inspector.tsx` (1073 lines) | Fixed heights, dense grids, hover-only actions; text editing lives only here. |
-| Settings | `components/preferences/SettingsPage.tsx`, `PreferenceFields.tsx` | M0 shell is responsive: the sidebar collapses to a stacked nav with a three-column tab strip, `PreferenceRow` is one column below `md`, and safe-area insets apply. The remaining gap is touch polish (target sizes, keyboard handling), which is M4, not the layout. Providers is hidden on mobile until the Keystore-backed secret store lands in M1: Android credential writes fail and trap the Back-to-editor save. |
+| Settings | `components/preferences/SettingsPage.tsx`, `PreferenceFields.tsx` | M0 shell is responsive: the sidebar collapses to a stacked nav with a three-column tab strip, `PreferenceRow` is one column below `md`, and safe-area insets apply. The remaining gap is touch polish (target sizes, keyboard handling), which is M4, not the layout. Providers is available on mobile since M1: credentials persist in the Keystore-backed store. |
 | Controls | `components/controls/*` | `FontPicker.tsx` 543 lines; popovers sized for pointer use. |
 | Startup / views | `components/app/StartView.tsx`, `StartupView.tsx`, `AboutDialog.tsx` | M0 hides the desktop window chrome on mobile and applies safe-area insets. `StartupView` still uses `h-screen w-screen`; the remaining M4 scope is `dvh` and viewport metadata, not the chrome. |
 | Fonts | `crates/koharu-renderer/src/fonts.rs` | HF dataset download must land in app-private storage, not an evictable cache. |
@@ -189,7 +190,7 @@ foreground-service requirement.
       generate Android bindings
 - [x] `koharu-secrets`: Android reports no credential instead of failing `Preferences` startup
 - [x] CI workflow added (`.github/workflows/android.yml`): `cargo ndk check`, debug APK
-      build, artifact upload; pushing a tag matching `android-m0-*` builds the debug arm64
+      build, artifact upload; pushing a tag matching `android-m*` builds the debug arm64
       APK and publishes it as a prerelease with the APK asset
 
   The preview job sets `CARGO_PROFILE_DEV_DEBUG=0`, so the preview APK is much smaller than
@@ -226,24 +227,40 @@ canvas path; rerun the probe on a physical GPU.
 
 **Goal:** the app can open real files, save keys, and survive long jobs.
 
-- [ ] New `koharu-android` plugin crate (Rust + Android/Kotlin): SAF picker, create-document,
+- [x] New `koharu-android` plugin crate (Rust + Android/Kotlin): SAF picker, create-document,
       share sheet, Keystore, foreground service, back button
-- [ ] Picker abstraction in `koharu-app`; `rfd` stays the desktop implementation.
+      (the share sheet has no call site yet; it is consumed by the M4 share action)
+- [x] Picker abstraction in `koharu-app`; `rfd` stays the desktop implementation.
       Import: multi-select ZIP/CBZ/PDF/RAR/images. Export: PNG/PSD/CBZ.
-      Handle `content://` URIs by copying into app cache before decode.
-- [ ] Keystore-backed store in `koharu-secrets` (same get/set/delete API; BYOK keys persist)
-- [ ] Foreground service + notification progress for `process` and model/font downloads;
-      partial wakelock; stop on cancel
-- [ ] Back button: close sheet/dialog → cancel gesture → background the app
-- [ ] `RunEvent::Resumed`/`Suspended`, orientation changes, soft-keyboard insets
-- [ ] `INTERNET` permission; first-run storage note
-- [ ] Fonts: fetch into app-private storage, not an evictable cache path
+      Handle `content://` URIs by copying into app cache before decode. The Android import
+      picker is unfiltered (`*/*`) because providers report `.cbz`/`.rar` as generic MIME
+      types; the importer rejects unsupported inputs by extension and content.
+- [x] Keystore-backed store in `koharu-secrets` (same get/set/delete API; BYOK keys persist).
+      A value that cannot be decrypted (lost Keystore key, Android Auto Backup restore) is
+      dropped and reported as unset instead of failing `Preferences::load`
+- [x] Foreground service + notification progress for `process` and model/font downloads;
+      partial wakelock; stop on cancel. The notification title falls back to the application
+      label and its text is data only (download or model name) so no English copy is
+      hardcoded in Rust
+- [x] Back button: close sheet/dialog → cancel gesture → background the app
+      (`packages/koharu/lib/back.ts` gives each dismissible surface a handler; Settings
+      saves before closing, the delete confirmation closes, and the app backgrounds when no
+      surface consumes the press. M4 adds sheets and gesture cancellation)
+- [x] `RunEvent::Resumed`/`Suspended`, orientation changes, soft-keyboard insets
+      (Wry reports these as `WindowEvent::Resumed`/`Suspended`. Orientation is already in the
+      activity's `configChanges` and safe-area insets are applied in M0. Keyboard-aware insets
+      stay with the M4 viewport work.)
+- [x] `INTERNET` permission; first-run storage note
+- [x] Fonts: fetch into app-private storage, not an evictable cache path
+      (the runtime store is configured under `app_data_dir` on mobile)
 
 **Exit criteria:** import a CBZ, open the project, export a PNG, save an API key, run a long
 job with the screen off.
 
-**Risk spike:** confirm `tauri-plugin-dialog` returns usable Android results before writing a
-JNI picker.
+**Risk spike:** resolved. `tauri-plugin-dialog` on Android returns opaque `content://` URIs
+and cannot pick a directory, which the PNG/PSD export needs. The plugin also rejects on
+cancel and would force a second copy stage. `koharu-android` therefore owns one SAF surface:
+multi-select document import, document-tree export, and create-document export.
 
 ---
 
@@ -348,7 +365,7 @@ a keyboard, mouse, or hover.
 | libtorch Android build, size, or operator coverage | M3 slips | Timebox a build spike first; fall back to an AAB feature module; selective-ops build only if size forces it | M3 |
 | Gemma 4 E4B memory on 8 GB | OOM | RAM-class profiles, text-only translation, E2B below 8 GB | M2 |
 | Sustained decode speed | Poor UX | Queue + foreground service, per-page progress, fast profile (Qwen 3.5 0.8B) | M2/M4 |
-| SAF URI handling via plugin | Import/export broken | Spike `tauri-plugin-dialog` before writing a JNI picker | M1 |
+| SAF URI handling via plugin | Import/export broken | Resolved in M1: `tauri-plugin-dialog` returns `content://` URIs and cannot pick a directory, so `koharu-android` owns one SAF surface (import, tree export, create-document) and stages copies in app cache | M1 |
 | Play policy on bundled native runtimes | Distribution | Bundle `.so` only; never download executable code | M0/M6 |
 | Detection model contract mismatch | Pipeline quality | Two-way spike with parity comparison | M3 |
 | `native-tls`/OpenSSL in the NDK build | Build failure | Switch to rustls first | M0 |
@@ -434,4 +451,6 @@ and what the next session should pick up.
 | 2026-10-21 | Plan | Repository surveyed; blockers, model profile, and milestones defined. No code changes. | Install toolchain, create `android` branch, start M0 |
 | 2026-10-21 | M0 | Installed toolchain and host deps. `koharu-app` now builds on `DynRuntime` (CEF/Wry chosen by the entry), plugins and dialogs split by target, Android paths injected, ML init lazy, secrets fail soft on Android, `koharu-bindgen` passes the NDK sysroot. `cargo ndk check` and `tauri android build --debug --target aarch64` succeed; APK is `rs.koharu.app`, `minSdk 31`, `arm64-v8a`; desktop `cargo check` still passes. | Install the APK on a device/emulator, verify the shell leaves `StartupView`, run the WebGPU probe, then exercise the CI workflow |
 | 2026-10-21 | M0 fixes | `process` loads the pipeline before registering the stop token/job, so a failed model load no longer leaves a phantom running job or blocks later requests with "another process is already running"; `koharu_config::configure` rejects configuration after the manager was created and `path()` is documented with the override; the unused workspace `open` dependency was removed; the desktop Settings panel keeps a square top-right corner (`md:rounded-tr-none`); the mobile startup screen hides desktop window chrome and respects safe-area insets. Verified on the emulator (Android 15, `sdk_gphone64_x86_64`): fresh 1.6 GB debug APK installs and boots after `adb uninstall rs.koharu.app` (`INSTALL_FAILED_INSUFFICIENT_STORAGE` otherwise), StartView and Settings render, storage hint and desktop title bar gone on mobile, Settings uses the stacked mobile layout with safe-area padding, assets come from `http://tauri.localhost/` with no dev server. WebGPU probe: `navigator.gpu` present, `requestAdapter()` returns `null` (SwiftShader), `UNRESTRICTED_EXTERNAL_TEXTURE_COPIES` unchecked. No physical phone tested. Hosts without Android Studio must export `JAVA_HOME` (21 works) — the Tauri CLI only auto-detects `/opt/android-studio/jbr` or `java` on `PATH`. `cargo-ndk` 4.1.2 is the tested version, now pinned in `android.yml`; CI has not run. | Install and boot on a physical phone, rerun the WebGPU probe on hardware, get the first CI run green |
-| 2026-10-21 | M0 review | Fixed `clippy::redundant_closure` in `koharu-bindgen`. Hid the Providers tab on mobile until the M1 Keystore store: a typed credential made "Back to editor" fail forever. Corrected the plan's stale Settings, startup, and external-link rows, the M4 Settings/safe-area overlap, the `adb reverse` note, and the desktop-error note (command errors are already toasted by `call()` in `packages/koharu/lib/backend.ts`). Added tag-triggered preview releases (`android-m0-*`, `CARGO_PROFILE_DEV_DEBUG=0`). CI run not verified yet. | Rerun CI, install and boot on a physical phone, rerun the WebGPU probe on hardware |
+| 2026-10-21 | M0 review | Fixed `clippy::redundant_closure` in `koharu-bindgen`. Hid the Providers tab on mobile until the M1 Keystore store: a typed credential made "Back to editor" fail forever. Corrected the plan's stale Settings, startup, and external-link rows, the M4 Settings/safe-area overlap, the `adb reverse` note, and the desktop-error note (command errors are already toasted by `call()` in `packages/koharu/lib/backend.ts`). Added tag-triggered preview releases (`android-m0-*`, `CARGO_PROFILE_DEV_DEBUG=0`) and made the desktop Release workflow ignore `android-*` tags. CI run not verified yet. | Rerun CI, install and boot on a physical phone, rerun the WebGPU probe on hardware |
+| 2026-10-21 | M1 | Added the `koharu-android` Tauri mobile plugin (SAF import/tree/create-document, share sheet, Keystore AES-GCM store, foreground service + partial wakelock, background command) and registered it from `crates/koharu`; `koharu-app` gained the picker/`Destination` abstraction with app-cache staging, `koharu-secrets` gained an installable `Backend`, and zero-prose notification payloads; the frontend gained `lib/back.ts`, re-enabled the Providers tab, and shows a platform-specific storage note in all 11 locales. `tauri-plugin-dialog` was rejected as the picker (content URIs, no tree picker) and the risk is closed. Verified: `cargo check -p koharu`, `cargo ndk -t arm64-v8a check -p koharu`, `cargo tauri android build --debug --target aarch64`, `:koharu-android:compileDebugKotlin`, oxlint + tsc; the APK installs and boots to StartView on the API 35 emulator. | Exercise the exit criteria on a device (import a CBZ, export a PNG, save a key, run a job with the screen off), then start M2 |
+| 2026-10-21 | M1 review fixes | Corrected the review findings: the import picker no longer MIME-filters (it hid `.cbz`/`.rar`); an undecryptable Keystore entry is dropped and reported unset instead of failing `Preferences::load`; `POST_NOTIFICATIONS` is requested at the first foreground start; the foreground refcount lock spans the count and the start/stop send, removing the stop-after-start race; notification text is data only and its title falls back to the application label; the back registry closes Settings with a save and the delete confirmation before backgrounding, and uses `dispatch`; non-Android mobile compiles again with the pre-M1 "picker unavailable" arms. Also removed the stale plugin `settings.gradle`, the unused `serde_json` dependency, and made the service instance `@Volatile`. | Same as M1: device verification, then M2 |

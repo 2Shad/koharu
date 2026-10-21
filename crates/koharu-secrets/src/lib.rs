@@ -1,9 +1,11 @@
+use anyhow::Context as _;
 #[cfg(not(target_os = "android"))]
 use keyring_core::Entry;
 use secrecy::{SecretBox, zeroize::Zeroize};
 use serde::{Deserialize, Serialize, Serializer};
 #[cfg(not(target_os = "android"))]
 use std::sync::LazyLock;
+use std::sync::{Arc, OnceLock};
 
 pub use secrecy::{ExposeSecret, SerializableSecret};
 
@@ -58,6 +60,57 @@ impl Serialize for SecretValue {
 
 impl SerializableSecret for SecretValue {}
 
+/// A platform credential store.
+///
+/// Every platform has exactly one store. The host may replace the platform default
+/// with [`install`] before the first secret access; Android relies on that to expose
+/// the Keystore through its plugin.
+pub trait Backend: Send + Sync {
+    fn get(&self, key: &str) -> anyhow::Result<Option<SecretString>>;
+    fn set(&self, key: &str, secret: &SecretString) -> anyhow::Result<()>;
+    fn delete(&self, key: &str) -> anyhow::Result<()>;
+}
+
+static BACKEND: OnceLock<Arc<dyn Backend>> = OnceLock::new();
+
+/// Installs the process-wide credential backend before the first secret access.
+///
+/// Reinstalling the same backend is a no-op; installing a different one is an error.
+pub fn install(backend: Arc<dyn Backend>) -> anyhow::Result<()> {
+    if let Some(active) = BACKEND.get() {
+        anyhow::ensure!(
+            Arc::ptr_eq(active, &backend),
+            "a credential backend is already installed"
+        );
+        return Ok(());
+    }
+
+    if let Err(requested) = BACKEND.set(backend) {
+        let active = BACKEND
+            .get()
+            .context("a credential backend was installed concurrently without a value")?;
+        anyhow::ensure!(
+            Arc::ptr_eq(active, &requested),
+            "a credential backend is already installed"
+        );
+    }
+    Ok(())
+}
+
+fn backend() -> &'static dyn Backend {
+    BACKEND.get_or_init(default_backend).as_ref()
+}
+
+#[cfg(not(target_os = "android"))]
+fn default_backend() -> Arc<dyn Backend> {
+    Arc::new(Keyring)
+}
+
+#[cfg(target_os = "android")]
+fn default_backend() -> Arc<dyn Backend> {
+    Arc::new(Unavailable)
+}
+
 #[cfg(not(target_os = "android"))]
 const SERVICE: &str = "koharu";
 
@@ -73,16 +126,13 @@ static CREDENTIAL_STORE: LazyLock<Result<(), String>> = LazyLock::new(|| {
     Ok(())
 });
 
-/// Load a Koharu secret by key, returning `None` when no credential exists.
-pub fn get(key: &str) -> anyhow::Result<Option<SecretString>> {
-    #[cfg(target_os = "android")]
-    {
-        // Android has no credential store until the platform plugin provides one.
-        let _ = key;
-        Ok(None)
-    }
-    #[cfg(not(target_os = "android"))]
-    {
+/// Desktop credential store backed by the operating system keyring.
+#[cfg(not(target_os = "android"))]
+struct Keyring;
+
+#[cfg(not(target_os = "android"))]
+impl Backend for Keyring {
+    fn get(&self, key: &str) -> anyhow::Result<Option<SecretString>> {
         let entry = entry(key)?;
         match entry.get_password() {
             Ok(value) => Ok(Some(SecretString::from(value))),
@@ -90,37 +140,52 @@ pub fn get(key: &str) -> anyhow::Result<Option<SecretString>> {
             Err(error) => Err(error.into()),
         }
     }
-}
 
-/// Store a Koharu secret by key.
-pub fn set(key: &str, secret: &SecretString) -> anyhow::Result<()> {
-    #[cfg(target_os = "android")]
-    {
-        let _ = (key, secret);
-        anyhow::bail!("Koharu cannot store credentials on Android yet");
-    }
-    #[cfg(not(target_os = "android"))]
-    {
+    fn set(&self, key: &str, secret: &SecretString) -> anyhow::Result<()> {
         entry(key)?.set_password(secret.expose_secret())?;
         Ok(())
     }
-}
 
-/// Delete a Koharu secret by key. Missing credentials are treated as success.
-pub fn delete(key: &str) -> anyhow::Result<()> {
-    #[cfg(target_os = "android")]
-    {
-        // Nothing can have been stored on Android, so there is nothing to delete.
-        let _ = key;
-        Ok(())
-    }
-    #[cfg(not(target_os = "android"))]
-    {
+    fn delete(&self, key: &str) -> anyhow::Result<()> {
         match entry(key)?.delete_credential() {
             Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
             Err(error) => Err(error.into()),
         }
     }
+}
+
+/// Fail-soft store used until the Android host installs the Keystore backend.
+#[cfg(target_os = "android")]
+struct Unavailable;
+
+#[cfg(target_os = "android")]
+impl Backend for Unavailable {
+    fn get(&self, _key: &str) -> anyhow::Result<Option<SecretString>> {
+        Ok(None)
+    }
+
+    fn set(&self, _key: &str, _secret: &SecretString) -> anyhow::Result<()> {
+        anyhow::bail!("Koharu cannot store credentials on Android yet")
+    }
+
+    fn delete(&self, _key: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
+
+/// Load a Koharu secret by key, returning `None` when no credential exists.
+pub fn get(key: &str) -> anyhow::Result<Option<SecretString>> {
+    backend().get(key)
+}
+
+/// Store a Koharu secret by key.
+pub fn set(key: &str, secret: &SecretString) -> anyhow::Result<()> {
+    backend().set(key, secret)
+}
+
+/// Delete a Koharu secret by key. Missing credentials are treated as success.
+pub fn delete(key: &str) -> anyhow::Result<()> {
+    backend().delete(key)
 }
 
 #[cfg(not(target_os = "android"))]
@@ -134,4 +199,33 @@ fn entry(key: &str) -> anyhow::Result<Entry> {
     #[cfg(not(target_os = "linux"))]
     let entry = keyring::Entry::new(SERVICE, key)?.inner;
     Ok(entry)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Stub;
+
+    impl Backend for Stub {
+        fn get(&self, _key: &str) -> anyhow::Result<Option<SecretString>> {
+            Ok(None)
+        }
+
+        fn set(&self, _key: &str, _secret: &SecretString) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn delete(&self, _key: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn install_accepts_one_backend() {
+        let backend = Arc::new(Stub);
+        install(backend.clone()).unwrap();
+        install(backend).unwrap();
+        assert!(install(Arc::new(Stub)).is_err());
+    }
 }

@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use strum::{EnumMessage as _, IntoEnumIterator as _};
 use tauri::{AppHandle, Manager as _, State, WebviewWindow, ipc::Channel};
-use walkdir::WalkDir;
 
 use super::{
     ChannelExt as _, Error,
@@ -322,6 +321,20 @@ pub(crate) async fn delete_project(
     Ok(())
 }
 
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn background_app(handle: AppHandle) -> std::result::Result<(), Error> {
+    #[cfg(target_os = "android")]
+    handle
+        .state::<koharu_android::Android>()
+        .inner()
+        .background()
+        .await?;
+    #[cfg(not(target_os = "android"))]
+    let _ = handle;
+    Ok(())
+}
+
 async fn close_current_project(handle: &AppHandle) -> Result<()> {
     handle.state::<AgentState>().reset().await;
     let processing = handle.state::<Processing>();
@@ -361,38 +374,31 @@ pub(crate) async fn import(
         .flat_map(|format| format.get_serializations())
         .copied()
         .collect::<Vec<_>>();
-    let Some(picked) = dialogs::pick_import(&window, source, &extensions).await? else {
+    let Some(files) = dialogs::pick_import(&window, source, &extensions).await? else {
         return Ok(());
-    };
-    let files = match source {
-        PageImportSource::Files => picked,
-        PageImportSource::Folder => picked
-            .into_iter()
-            .flat_map(|folder| {
-                WalkDir::new(folder)
-                    .follow_links(false)
-                    .into_iter()
-                    .filter_map(|entry| match entry {
-                        Ok(entry) if entry.file_type().is_file() => Some(entry.into_path()),
-                        Ok(_) => None,
-                        Err(error) => {
-                            tracing::warn!(%error, "could not inspect an import directory entry");
-                            None
-                        }
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .filter(|path| {
-                path.extension()
-                    .and_then(|extension| extension.to_str())
-                    .is_some_and(|extension| extension.parse::<import::Format>().is_ok())
-            })
-            .collect::<Vec<_>>(),
     };
     if files.is_empty() {
         return Err(anyhow::anyhow!("no supported images were found in the selection").into());
     }
-    let pages = tokio_rayon::spawn(move || import::import(files)).await?;
+    // Android copies each selection into its own cache directory; the project keeps the bytes.
+    #[cfg(target_os = "android")]
+    let staged = {
+        let mut directories = files
+            .iter()
+            .filter_map(|path| path.parent().map(|parent| parent.to_owned()))
+            .collect::<Vec<_>>();
+        directories.sort_unstable();
+        directories.dedup();
+        directories
+    };
+    let imported = tokio_rayon::spawn(move || import::import(files)).await;
+    #[cfg(target_os = "android")]
+    for directory in staged {
+        if let Err(error) = std::fs::remove_dir_all(&directory) {
+            tracing::warn!(%error, "could not remove a staged import directory");
+        }
+    }
+    let pages = imported?;
 
     let (commit, page) = {
         let mut project = project.project.lock().await;

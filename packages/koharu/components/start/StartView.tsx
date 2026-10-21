@@ -4,6 +4,7 @@ import { Folder, FolderPlus, Plus, Settings, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { registerBackHandler } from '@/lib/back'
 import { call } from '@/lib/backend'
 import { pageKey, pagesKey, projectKey, refresh } from '@/lib/queries'
 import { useKoharuStore } from '@/lib/store'
@@ -45,6 +46,16 @@ export function StartView() {
   useEffect(() => {
     void reload().catch(() => undefined)
   }, [reload])
+
+  // The confirmation dialog is a dismissible surface, so back closes it instead of
+  // backgrounding the app.
+  useEffect(() => {
+    if (projectToDelete === null) return
+    return registerBackHandler(() => {
+      setProjectToDelete(null)
+      return true
+    })
+  }, [projectToDelete])
 
   const createProject = async (event: FormEvent) => {
     event.preventDefault()
@@ -162,11 +173,9 @@ export function StartView() {
                   </Button>
                 </form>
 
-                {platform === 'desktop' && (
-                  <p className='mt-auto pt-8 text-[10px] leading-4 text-muted-foreground'>
-                    {t('start.storageHint')}
-                  </p>
-                )}
+                <p className='mt-auto pt-8 text-[10px] leading-4 text-muted-foreground'>
+                  {t(platform === 'mobile' ? 'start.storageHintMobile' : 'start.storageHint')}
+                </p>
               </aside>
 
               <section

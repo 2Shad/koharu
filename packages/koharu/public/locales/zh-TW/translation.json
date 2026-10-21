@@ -483,6 +483,7 @@
     "projectName": "專案名稱",
     "projectNamePlaceholder": "我的新專案",
     "storageHint": "專案會儲存在本機的「文件」資料夾中。",
+    "storageHintMobile": "專案儲存在 Koharu 的私有應用程式空間中。更新後仍會保留，但解除安裝應用程式時會被刪除。",
     "title": "專案",
     "yourProjects": "你的專案"
   },

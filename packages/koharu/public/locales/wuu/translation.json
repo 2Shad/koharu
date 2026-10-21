@@ -483,6 +483,7 @@
     "projectName": "项目名称",
     "projectNamePlaceholder": "我个新项目",
     "storageHint": "项目保存在本机个“文档”文件夹里向。",
+    "storageHintMobile": "项目保存勒 Koharu 自家个私有应用存储里向，更新后照样保留，卸载应用就会删脱。",
     "title": "项目",
     "yourProjects": "侬个项目"
   },

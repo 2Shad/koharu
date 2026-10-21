@@ -25,6 +25,7 @@ import {
 import { ProviderPreferences } from '@/components/preferences/ProviderPreferences'
 import { TranslationPreferences } from '@/components/preferences/TranslationPreferences'
 import { TypesettingPreferences } from '@/components/preferences/TypesettingPreferences'
+import { registerBackHandler } from '@/lib/back'
 import { refreshPreferences, refreshTranslationModels, savePreferences } from '@/lib/backend'
 import { supportedLanguages } from '@/lib/i18n'
 import { receivePreferences, useKoharuStore, type ShortcutAction } from '@/lib/store'
@@ -58,7 +59,6 @@ type Tab = TabEntry[0]
 
 export function SettingsPage() {
   const { t } = useTranslation()
-  const platform = useKoharuStore((state) => state.platform)
   const open = useKoharuStore((state) => state.settingsOpen)
   const setOpen = useKoharuStore((state) => state.setSettingsOpen)
   const preferences = useKoharuStore((state) => state.preferences)
@@ -122,6 +122,27 @@ export function SettingsPage() {
     [],
   )
 
+  const closeSettings = useCallback(() => {
+    if (!pipeline || !providers || !typesetting) {
+      setOpen(false)
+      return
+    }
+    void saveDraft(pipeline, providers, typesetting)
+      .then(() => setOpen(false))
+      .catch(() => undefined)
+  }, [pipeline, providers, saveDraft, setOpen, typesetting])
+
+  const closeSettingsRef = useRef(closeSettings)
+  closeSettingsRef.current = closeSettings
+
+  useEffect(() => {
+    if (!open) return
+    return registerBackHandler(() => {
+      closeSettingsRef.current()
+      return true
+    })
+  }, [open])
+
   useEffect(() => {
     if (!open) return
     void refreshPreferences().catch(() => undefined)
@@ -153,11 +174,6 @@ export function SettingsPage() {
     return () => window.clearTimeout(timeout)
   }, [open, pipeline, providers, saveDraft, typesetting])
 
-  // Mobile cannot persist provider credentials until the Keystore-backed store lands (M1),
-  // so hide the tab instead of offering a save that can never succeed.
-  const tabs: readonly TabEntry[] =
-    platform === 'mobile' ? allTabs.filter(([id]) => id !== 'providers') : allTabs
-
   if (!open) return null
 
   return (
@@ -167,15 +183,7 @@ export function SettingsPage() {
           type='button'
           variant='ghost'
           className='mb-2 h-9 justify-start gap-2 rounded-lg px-2 text-[12px] text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground md:mb-5'
-          onClick={() => {
-            if (!pipeline || !providers || !typesetting) {
-              setOpen(false)
-              return
-            }
-            void saveDraft(pipeline, providers, typesetting)
-              .then(() => setOpen(false))
-              .catch(() => undefined)
-          }}
+          onClick={closeSettings}
         >
           <ArrowLeft className='size-4' /> {t('settings.backToEditor')}
         </Button>
@@ -183,7 +191,7 @@ export function SettingsPage() {
           {t('settings.title')}
         </p>
         <div className='grid grid-cols-3 gap-1 md:grid-cols-1'>
-          {tabs.map(([id, Icon]) => (
+          {allTabs.map(([id, Icon]) => (
             <Button
               key={id}
               type='button'
