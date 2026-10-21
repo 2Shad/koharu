@@ -2,6 +2,7 @@
 
 import { LoaderCircle } from 'lucide-react'
 import Image from 'next/image'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { useMacOS, WindowControls } from '@/components/app/WindowChrome'
@@ -9,33 +10,40 @@ import { useMacOS, WindowControls } from '@/components/app/WindowChrome'
 export function StartupView() {
   const { t } = useTranslation()
   const macOS = useMacOS()
+  const [mobile, setMobile] = useState(false)
+
+  useEffect(() => {
+    setMobile(/Android|iPhone|iPad|iPod/.test(navigator.userAgent))
+  }, [])
 
   return (
-    <div className='relative flex h-screen w-screen flex-col overflow-hidden bg-[var(--surface-titlebar)] text-foreground'>
-      <header
-        data-tauri-drag-region='deep'
-        className='grid h-10 shrink-0 grid-cols-[132px_1fr_132px] items-center border-b border-border/80 bg-[var(--surface-titlebar)] shadow-[var(--shadow-titlebar)]'
-      >
-        <div className='flex h-full items-center'>
-          {!macOS && (
-            <div className='grid h-full w-10 place-items-center rounded-br-lg'>
-              <Image
-                className='pointer-events-none'
-                src='/icon.png'
-                alt=''
-                width={17}
-                height={17}
-                draggable={false}
-                priority
-              />
-            </div>
-          )}
-        </div>
-        <div className='grid h-full place-items-center text-[11px] text-muted-foreground select-none'>
-          Koharu
-        </div>
-        {!macOS && <WindowControls />}
-      </header>
+    <div className='relative flex h-screen w-screen flex-col overflow-hidden bg-[var(--surface-titlebar)] pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] text-foreground'>
+      {!mobile && (
+        <header
+          data-tauri-drag-region='deep'
+          className='grid h-10 shrink-0 grid-cols-[132px_1fr_132px] items-center border-b border-border/80 bg-[var(--surface-titlebar)] shadow-[var(--shadow-titlebar)]'
+        >
+          <div className='flex h-full items-center'>
+            {!macOS && (
+              <div className='grid h-full w-10 place-items-center rounded-br-lg'>
+                <Image
+                  className='pointer-events-none'
+                  src='/icon.png'
+                  alt=''
+                  width={17}
+                  height={17}
+                  draggable={false}
+                  priority
+                />
+              </div>
+            )}
+          </div>
+          <div className='grid h-full place-items-center text-[11px] text-muted-foreground select-none'>
+            Koharu
+          </div>
+          {!macOS && <WindowControls />}
+        </header>
+      )}
 
       <main className='relative grid min-h-0 flex-1 place-items-center overflow-hidden bg-[var(--surface-canvas)]'>
         <section

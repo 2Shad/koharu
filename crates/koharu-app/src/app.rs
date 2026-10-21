@@ -1,75 +1,24 @@
 use anyhow::{Context as _, Result};
 use tauri::{AppHandle, Manager as _, WindowEvent};
-use tauri_runtime_cef::{Cef, CefRuntime};
 use tokio::sync::Mutex;
 
 use crate::commands::{
     agent::AgentState,
     canvas::CanvasChannel,
     lifecycle::{
-        Download, DownloadChannel, DownloadState, Initialization, ModelResources, ProjectChannel,
-        ResourceChannel,
+        Download, DownloadChannel, DownloadState, Initialization, ProjectChannel, ResourceChannel,
     },
     processing::{JobChannel, Processing},
     project::{CurrentProject, ProjectLibrary},
 };
+use crate::models::Models;
 
-pub(crate) async fn initialize(handle: AppHandle<CefRuntime>) -> Result<()> {
-    koharu_ml::init()
-        .await
-        .context("failed to initialize the ML runtime")?;
-    let device = koharu_ml::device(false);
-    let pipeline = koharu_pipeline::Pipeline::load(device)?;
-    handle.manage(pipeline.clone());
-
-    let mut resources = pipeline.subscribe_resources();
-    let resource_handle = handle.clone();
-    drop(tauri::async_runtime::spawn(async move {
-        while resources.changed().await.is_ok() {
-            let snapshot = resources.borrow_and_update().clone();
-            let resources = resource_handle.state::<ResourceChannel>();
-            let mut channel = resources.channel.lock();
-            if let Some(current) = channel.as_ref()
-                && current.send(ModelResources::from(snapshot)).is_err()
-            {
-                channel.take();
-            }
-        }
-    }));
-
-    let project = handle
-        .state::<CurrentProject>()
-        .project
-        .lock()
-        .await
-        .as_ref()
-        .map(|project| (project.snapshot(), project.active_page()));
-    let desktop = handle.state::<koharu_desktop::Desktop>();
-    if let Some((snapshot, page)) = project {
-        desktop.show_page(&snapshot, page).await?;
-    } else {
-        desktop.clear().await;
-    }
-    Ok(())
-}
-
-pub fn run(context: tauri::Context<CefRuntime>) -> Result<()> {
-    let cef = Cef::default();
-    #[cfg(debug_assertions)]
-    let cef = cef.remote_debugging(tauri_runtime_cef::RemoteDebugging::Port {
-        port: 4000,
-        allowed_origins: Vec::new(),
-    });
-    #[cfg(target_os = "linux")]
-    let cef = cef
-        .enable_features(["Vulkan", "VulkanFromANGLE"])
-        .command_line_args([
-            ("--enable-unsafe-webgpu", None),
-            ("use-angle", Some("vulkan")),
-            ("--ozone-platform", Some("x11")),
-        ]);
-    tauri::Builder::<CefRuntime>::new()
-        .runtime(cef)
+/// Builds the application with every platform-neutral plugin, command, and window.
+///
+/// The caller selects the runtime before running it: CEF on desktop, the system webview on
+/// mobile. Nothing below this point names a concrete runtime.
+pub fn builder() -> tauri::Builder {
+    let builder = tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(tauri_plugin_log::log::LevelFilter::Info)
@@ -80,6 +29,9 @@ pub fn run(context: tauri::Context<CefRuntime>) -> Result<()> {
                 ))
                 .build(),
         )
+        .plugin(tauri_plugin_opener::init());
+    #[cfg(desktop)]
+    let builder = builder
         .plugin(tauri_plugin_single_instance::init(|handle, _, _| {
             if let Some(window) = handle.get_webview_window("main") {
                 let _ = window.unminimize();
@@ -97,9 +49,9 @@ pub fn run(context: tauri::Context<CefRuntime>) -> Result<()> {
                 )
                 .build(),
         )
-        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build());
+    builder
         .invoke_handler(crate::commands::bindings().invoke_handler())
         .setup(move |application| {
             #[cfg(all(target_os = "windows", not(debug_assertions)))]
@@ -110,11 +62,16 @@ pub fn run(context: tauri::Context<CefRuntime>) -> Result<()> {
                     .context("failed to locate Koharu's installation directory")?
                     .join("store"),
             )?;
+            #[cfg(mobile)]
+            koharu_runtime::Store::configure(application.path().app_data_dir()?.join("runtime"))?;
 
+            let handle = application.handle().clone();
+            #[cfg(mobile)]
+            koharu_config::configure(application.path().app_config_dir()?.join("config.toml"))?;
             application.manage(CurrentProject {
                 project: Mutex::new(None),
             });
-            application.manage(ProjectLibrary::new()?);
+            application.manage(ProjectLibrary::new(project_library_root(&handle)?)?);
             application.manage(Processing::default());
             application.manage(CanvasChannel::default());
             application.manage(JobChannel::default());
@@ -123,7 +80,7 @@ pub fn run(context: tauri::Context<CefRuntime>) -> Result<()> {
             application.manage(ProjectChannel::default());
             application.manage(Initialization::default());
 
-            let handle = application.handle().clone();
+            application.manage(Models::new(handle.clone()));
             application.manage(koharu_desktop::Desktop::new()?);
             application.manage(AgentState::new(handle.clone())?);
 
@@ -141,13 +98,7 @@ pub fn run(context: tauri::Context<CefRuntime>) -> Result<()> {
             window
                 .set_focus()
                 .context("failed to focus the main window")?;
-            let initialization_handle = handle.clone();
-            drop(tauri::async_runtime::spawn(async move {
-                initialize(initialization_handle.clone())
-                    .await
-                    .expect("failed to initialize the desktop runtime");
-                initialization_handle.state::<Initialization>().ready();
-            }));
+            handle.state::<Initialization>().ready();
 
             let mut downloads = koharu_runtime::download::subscribe();
             let download_handle = handle.clone();
@@ -228,6 +179,22 @@ pub fn run(context: tauri::Context<CefRuntime>) -> Result<()> {
                 window.state::<AgentState>().cancel_all();
             }
         })
-        .run(context)?;
-    Ok(())
+}
+
+/// Resolves the directory that stores projects.
+///
+/// Desktop keeps the user-visible `Documents/Koharu` library. Mobile uses application-private
+/// storage, which is the only location the platform keeps across upgrades.
+fn project_library_root(handle: &AppHandle) -> Result<std::path::PathBuf> {
+    #[cfg(desktop)]
+    {
+        let _ = handle;
+        Ok(dirs::document_dir()
+            .context("the Documents directory is unavailable")?
+            .join("Koharu"))
+    }
+    #[cfg(mobile)]
+    {
+        Ok(handle.path().app_data_dir()?.join("library"))
+    }
 }

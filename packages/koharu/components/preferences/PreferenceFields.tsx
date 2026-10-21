@@ -42,7 +42,7 @@ export function PreferenceSection({
           <p className='mt-0.5 text-[11px] leading-4 text-muted-foreground'>{description}</p>
         )}
       </div>
-      <div className='divide-y divide-border rounded-xl border border-border/80 bg-[var(--surface-panel)] px-5'>
+      <div className='divide-y divide-border rounded-xl border border-border/80 bg-[var(--surface-panel)] px-4 md:px-5'>
         {children}
       </div>
     </section>
@@ -62,9 +62,9 @@ export function PreferenceRow({
 }) {
   return (
     <div
-      className={`grid grid-cols-[minmax(150px,0.9fr)_minmax(220px,1.1fr)] gap-6 py-3.5 ${align === 'start' ? 'items-start' : 'items-center'}`}
+      className={`grid min-w-0 gap-2 py-3.5 md:grid-cols-[minmax(150px,0.9fr)_minmax(220px,1.1fr)] md:gap-6 ${align === 'start' ? 'items-start' : 'items-center'}`}
     >
-      <div>
+      <div className='min-w-0'>
         <p className='text-[12px] font-medium'>{title}</p>
         {description && (
           <p className='mt-0.5 text-[10px] leading-4 text-muted-foreground'>{description}</p>

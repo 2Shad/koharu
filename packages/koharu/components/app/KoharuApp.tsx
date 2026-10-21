@@ -19,6 +19,7 @@ export function KoharuApp() {
   const selectLayers = useKoharuStore((state) => state.selectLayers)
   const projectLoaded = project !== undefined
   const settingsOpen = useKoharuStore((state) => state.settingsOpen)
+  const platform = useKoharuStore((state) => state.platform)
   const activePage = project?.active_page
   const editorOpen = project !== undefined && project !== null && !settingsOpen
 
@@ -31,11 +32,11 @@ export function KoharuApp() {
   return (
     <div
       className={cn(
-        'relative flex h-screen w-screen flex-col overflow-hidden text-foreground',
+        'relative flex h-screen w-screen flex-col overflow-hidden pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-foreground',
         editorOpen ? 'bg-transparent' : 'bg-[var(--surface-titlebar)]',
       )}
     >
-      <TitleBar />
+      {platform === 'desktop' && <TitleBar />}
       {settingsOpen ? (
         <SettingsPage />
       ) : project === undefined ? (

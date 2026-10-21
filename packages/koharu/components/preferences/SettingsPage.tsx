@@ -45,7 +45,7 @@ import {
   SelectValue,
 } from '@koharu/ui/components/select'
 
-const tabs = [
+const allTabs = [
   ['appearance', Palette],
   ['pipeline', Cpu],
   ['providers', KeyRound],
@@ -53,10 +53,12 @@ const tabs = [
   ['typesetting', Type],
   ['shortcuts', Keyboard],
 ] as const
-type Tab = (typeof tabs)[number][0]
+type TabEntry = (typeof allTabs)[number]
+type Tab = TabEntry[0]
 
 export function SettingsPage() {
   const { t } = useTranslation()
+  const platform = useKoharuStore((state) => state.platform)
   const open = useKoharuStore((state) => state.settingsOpen)
   const setOpen = useKoharuStore((state) => state.setSettingsOpen)
   const preferences = useKoharuStore((state) => state.preferences)
@@ -151,15 +153,20 @@ export function SettingsPage() {
     return () => window.clearTimeout(timeout)
   }, [open, pipeline, providers, saveDraft, typesetting])
 
+  // Mobile cannot persist provider credentials until the Keystore-backed store lands (M1),
+  // so hide the tab instead of offering a save that can never succeed.
+  const tabs: readonly TabEntry[] =
+    platform === 'mobile' ? allTabs.filter(([id]) => id !== 'providers') : allTabs
+
   if (!open) return null
 
   return (
-    <section className='settings-page flex min-h-0 flex-1 bg-[var(--surface-sidebar)] text-foreground'>
-      <nav className='flex w-64 shrink-0 flex-col bg-[var(--surface-sidebar)] px-3 py-4'>
+    <section className='settings-page flex min-h-0 flex-1 flex-col bg-[var(--surface-sidebar)] text-foreground md:flex-row'>
+      <nav className='flex shrink-0 flex-col bg-[var(--surface-sidebar)] px-3 py-3 md:w-64 md:py-4'>
         <Button
           type='button'
           variant='ghost'
-          className='mb-5 h-9 justify-start gap-2 rounded-lg px-2 text-[12px] text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground'
+          className='mb-2 h-9 justify-start gap-2 rounded-lg px-2 text-[12px] text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground md:mb-5'
           onClick={() => {
             if (!pipeline || !providers || !typesetting) {
               setOpen(false)
@@ -172,10 +179,10 @@ export function SettingsPage() {
         >
           <ArrowLeft className='size-4' /> {t('settings.backToEditor')}
         </Button>
-        <p className='mb-2 px-2 text-[10px] font-semibold tracking-[0.14em] text-muted-foreground uppercase'>
+        <p className='mb-2 hidden px-2 text-[10px] font-semibold tracking-[0.14em] text-muted-foreground uppercase md:block'>
           {t('settings.title')}
         </p>
-        <div className='grid gap-1'>
+        <div className='grid grid-cols-3 gap-1 md:grid-cols-1'>
           {tabs.map(([id, Icon]) => (
             <Button
               key={id}
@@ -183,20 +190,20 @@ export function SettingsPage() {
               variant='ghost'
               size='sm'
               data-active={tab === id}
-              className='h-10 w-full justify-start gap-3 rounded-lg px-3 text-left text-[12px] text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground data-[active=true]:bg-accent data-[active=true]:text-accent-foreground'
+              className='h-9 min-w-0 justify-center gap-1.5 rounded-lg px-2 text-[12px] text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground data-[active=true]:bg-accent data-[active=true]:text-accent-foreground md:h-10 md:w-full md:justify-start md:gap-3 md:px-3 md:text-left'
               onClick={() => setTab(id)}
             >
-              <Icon className='size-4' /> {t(`settings.tabs.${id}`)}
+              <Icon className='size-4 shrink-0' /> {t(`settings.tabs.${id}`)}
             </Button>
           ))}
         </div>
       </nav>
-      <main className='relative z-10 flex min-w-0 flex-1 flex-col overflow-hidden rounded-tl-2xl bg-[var(--surface-canvas)] shadow-[var(--shadow-content)]'>
-        <header className='flex h-14 shrink-0 items-center border-b border-border/80 px-8'>
+      <main className='relative z-10 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-t-2xl bg-[var(--surface-canvas)] shadow-[var(--shadow-content)] md:rounded-tl-2xl md:rounded-tr-none'>
+        <header className='flex h-14 shrink-0 items-center border-b border-border/80 px-4 md:px-8'>
           <h1 className='text-[13px] font-semibold tracking-[-0.02em]'>{t('settings.title')}</h1>
         </header>
         <ScrollArea className='min-h-0 flex-1'>
-          <div className='mx-auto w-full max-w-4xl px-10 py-10'>
+          <div className='mx-auto w-full max-w-4xl px-4 py-6 md:px-10 md:py-10'>
             {tab === 'appearance' && <AppearancePreferences />}
             {tab === 'pipeline' &&
               (pipeline ? (

@@ -27,6 +27,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@koharu/ui/components/t
 export function StartView() {
   const { t } = useTranslation()
   const setSettingsOpen = useKoharuStore((state) => state.setSettingsOpen)
+  const platform = useKoharuStore((state) => state.platform)
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [name, setName] = useState('')
   const [busy, setBusy] = useState<string | null>('list')
@@ -161,9 +162,11 @@ export function StartView() {
                   </Button>
                 </form>
 
-                <p className='mt-auto pt-8 text-[10px] leading-4 text-muted-foreground'>
-                  {t('start.storageHint')}
-                </p>
+                {platform === 'desktop' && (
+                  <p className='mt-auto pt-8 text-[10px] leading-4 text-muted-foreground'>
+                    {t('start.storageHint')}
+                  </p>
+                )}
               </aside>
 
               <section

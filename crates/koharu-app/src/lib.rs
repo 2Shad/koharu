@@ -2,6 +2,7 @@
 
 mod app;
 mod commands;
+mod models;
 
-pub use app::run;
+pub use app::builder;
 pub use commands::bindings;

@@ -8,7 +8,6 @@ use parking_lot::Mutex;
 use serde::Serialize;
 use specta::Type;
 use tauri::{AppHandle, Manager as _, State, ipc::Channel};
-use tauri_runtime_cef::CefRuntime;
 use tokio::sync::Notify;
 
 use self::host::KoharuHost;
@@ -30,7 +29,7 @@ pub(crate) struct AgentState {
 }
 
 impl AgentState {
-    pub(crate) fn new(handle: AppHandle<CefRuntime>) -> Result<Self> {
+    pub(crate) fn new(handle: AppHandle) -> Result<Self> {
         Ok(Self {
             agent: Arc::new(Agent::new(Codex::new()?, KoharuHost::new(handle))?),
             runs: Mutex::new(HashMap::new()),
@@ -102,9 +101,12 @@ pub(crate) async fn get_agent_status(
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn login_agent(
+    handle: AppHandle,
     state: State<'_, AgentState>,
     on_event: Channel<LoginEvent>,
 ) -> std::result::Result<AgentStatus, Error> {
+    use tauri_plugin_opener::OpenerExt as _;
+
     let control = Control::default();
     {
         let mut login = state.login.lock();
@@ -120,7 +122,7 @@ pub(crate) async fn login_agent(
             if let LoginEvent::DeviceCode {
                 verification_url, ..
             } = &event
-                && let Err(error) = open::that(verification_url)
+                && let Err(error) = handle.opener().open_url(verification_url, None::<&str>)
             {
                 tracing::warn!(%error, "failed to open the Codex device sign-in page");
             }
@@ -157,7 +159,7 @@ pub(crate) async fn save_agent_config(
 pub(crate) async fn run_agent(
     prompt: String,
     on_event: Channel<Event>,
-    handle: AppHandle<CefRuntime>,
+    handle: AppHandle,
     state: State<'_, AgentState>,
 ) -> std::result::Result<RunId, Error> {
     let prompt = prompt.trim().to_owned();

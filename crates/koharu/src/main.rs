@@ -1,18 +1,19 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-#[cfg(all(target_os = "linux", target_env = "gnu"))]
+#[cfg(all(desktop, target_os = "linux", target_env = "gnu"))]
 mod mallinfo;
 
+#[cfg(desktop)]
 use clap::Parser as _;
-use koharu::panic;
-use koharu::sentry;
-use koharu_app as app;
-use tracing_subscriber::layer::SubscriberExt as _;
 
+#[cfg(desktop)]
 #[derive(clap::Parser)]
 #[command(version, about)]
 struct Cli {}
 
+/// Desktop process entrypoint. Mobile launches through `koharu::run`'s platform entry
+/// point instead, so Cargo's binary target is inert there.
+#[cfg(desktop)]
 #[tokio::main]
 #[tauri_runtime_cef::cef_entry_point]
 async fn main() {
@@ -27,19 +28,10 @@ async fn main() {
     }
 
     let _cli = Cli::parse();
-    let _guard = sentry::initialize();
-    panic::install();
-    tracing::subscriber::set_global_default(
-        tracing_subscriber::registry()
-            .with(
-                tracing_subscriber::filter::EnvFilter::builder()
-                    .with_default_directive(tracing::Level::INFO.into())
-                    .from_env_lossy(),
-            )
-            .with(sentry::tracing_layer())
-            .with(koharu::tracing::TimingLayer::new()),
-    )
-    .expect("failed to set the global tracing subscriber");
-    tokio::task::block_in_place(|| app::run(tauri::generate_context!()))
-        .expect("failed to run the desktop application");
+    let _guard = koharu::sentry::initialize();
+    koharu::panic::install();
+    tokio::task::block_in_place(koharu::run);
 }
+
+#[cfg(mobile)]
+fn main() {}

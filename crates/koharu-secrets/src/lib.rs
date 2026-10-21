@@ -1,6 +1,8 @@
+#[cfg(not(target_os = "android"))]
 use keyring_core::Entry;
 use secrecy::{SecretBox, zeroize::Zeroize};
 use serde::{Deserialize, Serialize, Serializer};
+#[cfg(not(target_os = "android"))]
 use std::sync::LazyLock;
 
 pub use secrecy::{ExposeSecret, SerializableSecret};
@@ -56,8 +58,10 @@ impl Serialize for SecretValue {
 
 impl SerializableSecret for SecretValue {}
 
+#[cfg(not(target_os = "android"))]
 const SERVICE: &str = "koharu";
 
+#[cfg(not(target_os = "android"))]
 static CREDENTIAL_STORE: LazyLock<Result<(), String>> = LazyLock::new(|| {
     #[cfg(target_os = "linux")]
     {
@@ -71,28 +75,55 @@ static CREDENTIAL_STORE: LazyLock<Result<(), String>> = LazyLock::new(|| {
 
 /// Load a Koharu secret by key, returning `None` when no credential exists.
 pub fn get(key: &str) -> anyhow::Result<Option<SecretString>> {
-    let entry = entry(key)?;
-    match entry.get_password() {
-        Ok(value) => Ok(Some(SecretString::from(value))),
-        Err(keyring_core::Error::NoEntry) => Ok(None),
-        Err(error) => Err(error.into()),
+    #[cfg(target_os = "android")]
+    {
+        // Android has no credential store until the platform plugin provides one.
+        let _ = key;
+        Ok(None)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let entry = entry(key)?;
+        match entry.get_password() {
+            Ok(value) => Ok(Some(SecretString::from(value))),
+            Err(keyring_core::Error::NoEntry) => Ok(None),
+            Err(error) => Err(error.into()),
+        }
     }
 }
 
 /// Store a Koharu secret by key.
 pub fn set(key: &str, secret: &SecretString) -> anyhow::Result<()> {
-    entry(key)?.set_password(secret.expose_secret())?;
-    Ok(())
+    #[cfg(target_os = "android")]
+    {
+        let _ = (key, secret);
+        anyhow::bail!("Koharu cannot store credentials on Android yet");
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        entry(key)?.set_password(secret.expose_secret())?;
+        Ok(())
+    }
 }
 
 /// Delete a Koharu secret by key. Missing credentials are treated as success.
 pub fn delete(key: &str) -> anyhow::Result<()> {
-    match entry(key)?.delete_credential() {
-        Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
-        Err(error) => Err(error.into()),
+    #[cfg(target_os = "android")]
+    {
+        // Nothing can have been stored on Android, so there is nothing to delete.
+        let _ = key;
+        Ok(())
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        match entry(key)?.delete_credential() {
+            Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
+            Err(error) => Err(error.into()),
+        }
     }
 }
 
+#[cfg(not(target_os = "android"))]
 fn entry(key: &str) -> anyhow::Result<Entry> {
     match &*CREDENTIAL_STORE {
         Ok(()) => {}

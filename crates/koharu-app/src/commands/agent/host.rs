@@ -11,7 +11,6 @@ use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tauri::{AppHandle, Manager as _};
-use tauri_runtime_cef::CefRuntime;
 
 use crate::commands::{
     ChannelExt as _,
@@ -22,14 +21,15 @@ use crate::commands::{
     processing::{JobId, Processing},
     project::{CurrentProject, Project, Typography},
 };
+use crate::models::Models;
 
 #[derive(Clone)]
 pub(super) struct KoharuHost {
-    handle: AppHandle<CefRuntime>,
+    handle: AppHandle,
 }
 
 impl KoharuHost {
-    pub(super) fn new(handle: AppHandle<CefRuntime>) -> Self {
+    pub(super) fn new(handle: AppHandle) -> Self {
         Self { handle }
     }
 
@@ -157,7 +157,9 @@ impl KoharuHost {
         };
         let result = self
             .handle
-            .state::<koharu_pipeline::Pipeline>()
+            .state::<Models>()
+            .pipeline()
+            .await?
             .execute(snapshot, request, &mut committer)
             .await;
         watcher.abort();
