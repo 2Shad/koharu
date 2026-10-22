@@ -162,9 +162,13 @@ impl Plan {
         for node in order {
             let component = self.graph[node];
             if let Err(error) = component.activate().await {
+                // `%error` (anyhow's `Display`) renders only the outermost
+                // context; the alternate form keeps the full cause chain, so the
+                // log names the specific library and the loader error that
+                // failed instead of repeating the package label.
                 tracing::warn!(
                     label = %component.label(),
-                    %error,
+                    error = %format!("{error:#}"),
                     "runtime package failed to activate; its feature is unavailable"
                 );
                 continue;
