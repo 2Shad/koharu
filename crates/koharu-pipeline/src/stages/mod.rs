@@ -9,7 +9,9 @@ use anyhow::Result;
 use async_trait::async_trait;
 use koharu_scene::{Edit, EntityId, Generation, Patch, ProducerId, Snapshot};
 
-pub use detection::KoharuLayoutRFDetrSeg2XLConfig;
+pub use detection::{
+    ComicLayoutYolo26sConfig, KoharuLayoutRFDetrSeg2XLConfig, PpDocLayoutV3Config,
+};
 pub use inpainting::{Flux2KleinConfig, RoremMixedConfig};
 
 use crate::{Bounds, ImageCache, InpaintingMask, PipelineConfig, Stage};
@@ -117,6 +119,19 @@ impl Stages {
 
     pub(crate) fn unload(&self, stage: Stage) -> bool {
         self.processor(stage).unload()
+    }
+
+    /// Evicts every resident model except `keep`. The mobile memory policy calls
+    /// this before loading a stage so only one set of weights is ever resident.
+    pub(crate) fn unload_except(&self, keep: Stage) -> bool {
+        let mut unloaded = false;
+        for stage in Stage::ALL {
+            if stage != keep && self.unload(stage) {
+                tracing::debug!(%stage, "unloaded model to keep one stage resident");
+                unloaded = true;
+            }
+        }
+        unloaded
     }
 }
 

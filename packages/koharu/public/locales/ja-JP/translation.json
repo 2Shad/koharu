@@ -389,7 +389,8 @@
         "negativePrompt": "ネガティブプロンプト",
         "panelThreshold": "コマしきい値",
         "prompt": "プロンプト",
-        "textThreshold": "テキストしきい値"
+        "textThreshold": "テキストしきい値",
+        "threshold": "しきい値"
       },
       "processing": "処理中",
       "stages": {

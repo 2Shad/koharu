@@ -79,9 +79,9 @@ impl Runtime {
         anyhow::bail!("no device supports the requested runtime features")
     }
 
-    /// The requested features that resolved on the selected device. Backends for
-    /// requested features absent from this list were not activated and must not
-    /// be initialized by the caller.
+    /// The requested features whose packages actually activated. Read it after
+    /// [`Runtime::initialize`]; a package that failed to load is absent, and the
+    /// caller must not initialize the backend for a feature that is not listed.
     #[must_use]
     pub fn features(&self) -> Vec<Feature> {
         self.features.clone()
@@ -116,9 +116,16 @@ impl Runtime {
     }
 
     /// Installs and activates packages, then returns the process-wide device.
+    /// Features whose packages fail to activate are dropped from
+    /// [`Runtime::features`] instead of failing the whole plan.
     #[tracing::instrument(skip_all)]
-    pub async fn initialize(self) -> Result<Device> {
+    pub async fn initialize(&mut self) -> Result<Device> {
         let device = self.hardware.device().cloned().unwrap_or_else(Device::cpu);
-        self.plan.initialize(device).await
+        let (device, activated) = self.plan.initialize(device).await?;
+        self.features = activated
+            .into_iter()
+            .filter_map(Component::feature)
+            .collect();
+        Ok(device)
     }
 }

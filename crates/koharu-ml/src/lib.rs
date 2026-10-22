@@ -46,15 +46,17 @@ static READY: OnceCell<Device> = OnceCell::const_new();
 pub async fn init() -> anyhow::Result<()> {
     READY
         .get_or_try_init(|| async {
-            let runtime = Runtime::discover([Feature::Torch, Feature::Llama, Feature::Diffusion])?;
-            // A platform may publish a subset of the native runtimes (Android is
-            // llama.cpp only until the Torch and diffusion packages land), so the
-            // backend for a feature that did not resolve must not be initialized.
-            let features = runtime.features();
+            let mut runtime =
+                Runtime::discover([Feature::Torch, Feature::Llama, Feature::Diffusion])?;
             let device = runtime
                 .initialize()
                 .await
                 .context("failed to initialize runtimes")?;
+            // A platform may publish a subset of the native runtimes (Android
+            // publishes llama.cpp and Torch only until the diffusion package
+            // lands), so the backend for a feature that did not resolve or
+            // activate must not be initialized.
+            let features = runtime.features();
 
             if features.contains(&Feature::Llama) {
                 LLAMA

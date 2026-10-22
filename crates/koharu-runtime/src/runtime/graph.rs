@@ -9,7 +9,7 @@ use petgraph::{
 use crate::{
     Device, Hardware,
     runtime::{
-        DiscoverablePackage, RuntimePackage,
+        DiscoverablePackage, Feature, RuntimePackage,
         packages::{Cuda, Diffusion, Llama, Rocm, Torch},
     },
 };
@@ -51,6 +51,17 @@ impl Component {
             Self::Torch(package) => package.label(),
             Self::Llama(package) => package.label(),
             Self::Diffusion(package) => package.label(),
+        }
+    }
+
+    /// The consumer feature a top-level runtime package provides. Accelerator
+    /// components (CUDA, ROCm) are dependencies and do not map to a feature.
+    pub(crate) fn feature(self) -> Option<Feature> {
+        match self {
+            Self::Torch(_) => Some(Feature::Torch),
+            Self::Llama(_) => Some(Feature::Llama),
+            Self::Diffusion(_) => Some(Feature::Diffusion),
+            Self::Cuda(_) | Self::Rocm(_) => None,
         }
     }
 }
@@ -135,22 +146,36 @@ impl Plan {
         self.graph.update_edge(before, after, ());
     }
 
-    pub(crate) async fn initialize(&self, mut device: Device) -> Result<Device> {
+    /// Activates every reachable component in dependency order and returns the
+    /// ones that activated. A package that is present but fails to load is
+    /// logged and skipped rather than aborting the whole plan: a platform may
+    /// publish only a subset of the runtimes, and a missing accelerator must not
+    /// take the runtimes that did load down with it.
+    pub(crate) async fn initialize(&self, mut device: Device) -> Result<(Device, Vec<Component>)> {
         let order = toposort(&self.graph, None).map_err(|cycle| {
             anyhow!(
                 "runtime dependency cycle contains {}",
                 self.graph[cycle.node_id()].label()
             )
         })?;
+        let mut activated = Vec::new();
         for node in order {
             let component = self.graph[node];
-            component.activate().await?;
+            if let Err(error) = component.activate().await {
+                tracing::warn!(
+                    label = %component.label(),
+                    %error,
+                    "runtime package failed to activate; its feature is unavailable"
+                );
+                continue;
+            }
+            activated.push(component);
             if let Component::Rocm(rocm) = component {
                 device.index = rocm.probe().await?;
                 device.name = format!("ROCm{}", device.index);
             }
         }
-        Ok(device)
+        Ok((device, activated))
     }
 }
 

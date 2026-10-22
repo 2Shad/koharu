@@ -3,7 +3,10 @@ use koharu_translator::{GenerationConfig, Language};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use specta::Type;
 
-use crate::stages::{Flux2KleinConfig, KoharuLayoutRFDetrSeg2XLConfig, RoremMixedConfig};
+use crate::stages::{
+    ComicLayoutYolo26sConfig, Flux2KleinConfig, KoharuLayoutRFDetrSeg2XLConfig,
+    PpDocLayoutV3Config, RoremMixedConfig,
+};
 
 #[derive(Clone, Debug, PartialEq, Type)]
 pub struct PipelineConfig {
@@ -31,14 +34,14 @@ impl Default for PipelineFile {
     fn default() -> Self {
         Self {
             detection: ModelSelection {
-                model: "koharu-layout-rfdetr-seg-2xl".to_owned(),
+                model: DetectionModel::default_for_platform().name().to_owned(),
             },
             ocr: ModelSelection {
-                model: "paddleocr-vl-1.6".to_owned(),
+                model: OcrModel::default_for_platform().name().to_owned(),
             },
             translation: TranslationConfig::default(),
             inpainting: ModelSelection {
-                model: "lama".to_owned(),
+                model: InpaintingModel::default_for_platform().name().to_owned(),
             },
             processor: ProcessorConfig::default(),
         }
@@ -56,26 +59,27 @@ impl Serialize for PipelineConfig {
     where
         S: Serializer,
     {
-        let detection = match &self.detection {
-            DetectionModel::KoharuLayoutRFDetrSeg2XL(_) => "koharu-layout-rfdetr-seg-2xl",
-        };
-        let ocr = match &self.ocr {
-            OcrModel::PaddleOcrVl1_6 => "paddleocr-vl-1.6",
-            OcrModel::MangaOcr => "manga-ocr",
-            OcrModel::BaberuOcr => "baberu-ocr",
-            OcrModel::HayaiOcr => "hayai-ocr",
-        };
-        let inpainting = match &self.inpainting {
-            InpaintingModel::LaMa {} => "lama",
-            InpaintingModel::AotInpainting {} => "aot-inpainting",
-            InpaintingModel::Flux2Klein(_) => "flux2-klein",
-            InpaintingModel::RoremMixed(_) => "rorem-mixed",
-        };
+        let detection = self.detection.name();
+        let ocr = self.ocr.name();
+        let inpainting = self.inpainting.name();
         let mut processor = self.processor.clone();
-        let DetectionModel::KoharuLayoutRFDetrSeg2XL(config) = &self.detection;
-        processor
-            .koharu_layout_rfdetr_seg_2xl
-            .get_or_insert_with(|| config.clone());
+        match &self.detection {
+            DetectionModel::KoharuLayoutRFDetrSeg2XL(config) => {
+                processor
+                    .koharu_layout_rfdetr_seg_2xl
+                    .get_or_insert_with(|| config.clone());
+            }
+            DetectionModel::PpDocLayoutV3(config) => {
+                processor
+                    .pp_doclayout_v3
+                    .get_or_insert_with(|| config.clone());
+            }
+            DetectionModel::ComicLayoutYolo26s(config) => {
+                processor
+                    .comic_layout_yolo26s
+                    .get_or_insert_with(|| config.clone());
+            }
+        }
         match &self.inpainting {
             InpaintingModel::Flux2Klein(config) => {
                 processor.flux2_klein.get_or_insert_with(|| config.clone());
@@ -112,6 +116,15 @@ impl<'de> Deserialize<'de> for PipelineConfig {
             "koharu-layout-rfdetr-seg-2xl" => DetectionModel::KoharuLayoutRFDetrSeg2XL(
                 file.processor
                     .koharu_layout_rfdetr_seg_2xl
+                    .clone()
+                    .unwrap_or_default(),
+            ),
+            "pp-doclayout-v3" => DetectionModel::PpDocLayoutV3(
+                file.processor.pp_doclayout_v3.clone().unwrap_or_default(),
+            ),
+            "comic-layout-yolo26s" => DetectionModel::ComicLayoutYolo26s(
+                file.processor
+                    .comic_layout_yolo26s
                     .clone()
                     .unwrap_or_default(),
             ),
@@ -160,12 +173,10 @@ impl<'de> Deserialize<'de> for PipelineConfig {
 impl Default for PipelineConfig {
     fn default() -> Self {
         Self {
-            detection: DetectionModel::KoharuLayoutRFDetrSeg2XL(
-                KoharuLayoutRFDetrSeg2XLConfig::default(),
-            ),
-            ocr: OcrModel::PaddleOcrVl1_6,
+            detection: DetectionModel::default_for_platform(),
+            ocr: OcrModel::default_for_platform(),
             translation: TranslationConfig::default(),
-            inpainting: InpaintingModel::LaMa {},
+            inpainting: InpaintingModel::default_for_platform(),
             processor: ProcessorConfig::default(),
         }
     }
@@ -206,6 +217,18 @@ impl PipelineConfig {
                         .unwrap_or_else(|| config.clone()),
                 ))
             }
+            DetectionModel::PpDocLayoutV3(config) => Ok(DetectionModel::PpDocLayoutV3(
+                self.processor
+                    .pp_doclayout_v3
+                    .clone()
+                    .unwrap_or_else(|| config.clone()),
+            )),
+            DetectionModel::ComicLayoutYolo26s(config) => Ok(DetectionModel::ComicLayoutYolo26s(
+                self.processor
+                    .comic_layout_yolo26s
+                    .clone()
+                    .unwrap_or_else(|| config.clone()),
+            )),
         }
     }
 
@@ -249,6 +272,10 @@ impl PipelineConfig {
 pub struct ProcessorConfig {
     #[serde(rename = "koharu-layout-rfdetr-seg-2xl")]
     pub koharu_layout_rfdetr_seg_2xl: Option<KoharuLayoutRFDetrSeg2XLConfig>,
+    #[serde(rename = "pp-doclayout-v3")]
+    pub pp_doclayout_v3: Option<PpDocLayoutV3Config>,
+    #[serde(rename = "comic-layout-yolo26s")]
+    pub comic_layout_yolo26s: Option<ComicLayoutYolo26sConfig>,
     #[serde(rename = "flux2-klein")]
     pub flux2_klein: Option<Flux2KleinConfig>,
     #[serde(rename = "rorem-mixed")]
@@ -260,6 +287,34 @@ pub struct ProcessorConfig {
 pub enum DetectionModel {
     #[serde(rename = "koharu-layout-rfdetr-seg-2xl")]
     KoharuLayoutRFDetrSeg2XL(KoharuLayoutRFDetrSeg2XLConfig),
+    #[serde(rename = "pp-doclayout-v3")]
+    PpDocLayoutV3(PpDocLayoutV3Config),
+    #[serde(rename = "comic-layout-yolo26s")]
+    ComicLayoutYolo26s(ComicLayoutYolo26sConfig),
+}
+
+impl DetectionModel {
+    /// Detection runs on-device on every platform. Mobile defaults to the
+    /// comic-native YOLO26s segmenter: its labels map directly onto the
+    /// text/bubble/panel contract and it has the smallest footprint, unlike the
+    /// document-oriented PP-DocLayout-V3 or the 1152px RF-DETR Seg 2XL.
+    #[must_use]
+    pub fn default_for_platform() -> Self {
+        if cfg!(target_os = "android") {
+            Self::ComicLayoutYolo26s(ComicLayoutYolo26sConfig::default())
+        } else {
+            Self::KoharuLayoutRFDetrSeg2XL(KoharuLayoutRFDetrSeg2XLConfig::default())
+        }
+    }
+
+    #[must_use]
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::KoharuLayoutRFDetrSeg2XL(_) => "koharu-layout-rfdetr-seg-2xl",
+            Self::PpDocLayoutV3(_) => "pp-doclayout-v3",
+            Self::ComicLayoutYolo26s(_) => "comic-layout-yolo26s",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
@@ -275,6 +330,31 @@ pub enum OcrModel {
     HayaiOcr,
 }
 
+impl OcrModel {
+    /// Mobile defaults to Manga OCR: the target library is Japanese manga, its
+    /// weights are small, and it shares the Torch runtime with detection and
+    /// inpainting. Other scripts stay on PaddleOCR-VL, which is the desktop
+    /// default.
+    #[must_use]
+    pub fn default_for_platform() -> Self {
+        if cfg!(target_os = "android") {
+            Self::MangaOcr
+        } else {
+            Self::PaddleOcrVl1_6
+        }
+    }
+
+    #[must_use]
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::PaddleOcrVl1_6 => "paddleocr-vl-1.6",
+            Self::MangaOcr => "manga-ocr",
+            Self::BaberuOcr => "baberu-ocr",
+            Self::HayaiOcr => "hayai-ocr",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
 #[serde(tag = "model")]
 pub enum InpaintingModel {
@@ -286,6 +366,29 @@ pub enum InpaintingModel {
     Flux2Klein(Flux2KleinConfig),
     #[serde(rename = "rorem-mixed")]
     RoremMixed(RoremMixedConfig),
+}
+
+impl InpaintingModel {
+    /// Mobile defaults to AOT: it is Torch-only, tiny, and fast. LaMa stays the
+    /// desktop default and is selectable on mobile.
+    #[must_use]
+    pub fn default_for_platform() -> Self {
+        if cfg!(target_os = "android") {
+            Self::AotInpainting {}
+        } else {
+            Self::LaMa {}
+        }
+    }
+
+    #[must_use]
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::LaMa {} => "lama",
+            Self::AotInpainting {} => "aot-inpainting",
+            Self::Flux2Klein(_) => "flux2-klein",
+            Self::RoremMixed(_) => "rorem-mixed",
+        }
+    }
 }
 
 #[cfg(test)]

@@ -38,7 +38,11 @@ Koharu 会下载所用功能需要的原生库与模型文件。运行发行版�
 
 ## Android
 
-Android 版本设计为在设备上完成检测、OCR、翻译和修补，因此首个发行版可离线运行。当前里程碑在设备上运行的是随包的 llama.cpp 翻译运行时；检测、OCR 和修补仍在陆续落地。Android 不会下载可执行代码：llama.cpp 运行时（`libllama`、`libmtmd`）随 APK 一同打包，并从应用的本地库目录加载。模型权重属于数据，按常规下载。
+Android 版本在设备上完成检测、OCR、翻译和修补，因此首个发行版可离线运行。Android 不会下载可执行代码：llama.cpp 运行时（`libllama`、`libmtmd`）与 LibTorch 运行时（`libtorch_cpu`、`libkoharu-torch` 及其依赖）随 APK 一同打包，并从应用的本地库目录加载。模型权重属于数据，按常规下载。
+
+### 移动端默认值
+
+移动端管线一次只常驻一个阶段模型：加载某个阶段前会卸载其他阶段，因此峰值内存取决于最大的单个模型，而非总和。默认值面向漫画：检测使用 Comic Layout YOLO26s（`balloon`/`text`/`frame` 对应气泡/文本/分格），OCR 使用 Manga OCR，修补使用 AOT。1152px 的 RF-DETR Seg 2XL 与 LaMa 仍可选用；PP-DocLayout-V3 面向文档版式，仅其文本区域会映射到漫画契约。
 
 ### 移动端模型配置
 
@@ -77,6 +81,16 @@ cargo run -p koharu-translator --bin bench -- --model <model.gguf> --quantizatio
 | 12 GB 旗舰 |  | 12 GB | Q4_K_XL |  |  |  |  |  |
 | 6 GB 下限 |  | 6 GB | Q2_K_XL |  |  |  |  |  |
 
+### 一致性校验
+
+用同一批页面验证设备端输出与桌面端一致：
+
+```sh
+cargo run -p koharu-pipeline --bin parity -- --input <page-directory> --output android.json
+```
+
+分别在桌面端与设备端运行，然后对比两份 JSON（检测框、掩码摘要、OCR 文本、翻译）。
+
 ## 下载与缓存
 
 | 数据                                     | 获取时机               |
@@ -85,7 +99,7 @@ cargo run -p koharu-translator --bin bench -- --model <model.gguf> --quantizatio
 | 固定版本的模型权重                       | 首次使用所选处理模型时 |
 | 本地 GGUF 量化文件                       | 选择并使用该模型文件时 |
 
-在 macOS 和 Linux 上，软件包位于系统缓存目录的 `koharu/packages`；在 Windows 上，位于 Koharu 安装目录内的 `store` 目录。项目位于 `Documents/Koharu`，设置位于 `~/.koharu/config.toml`。详见[数据位置](/zh/reference/data)。
+在 Android 上，Torch 与 llama.cpp 运行时软件包随 APK 打包而非下载，只获取模型权重。在 macOS 和 Linux 上，软件包位于系统缓存目录的 `koharu/packages`；在 Windows 上，位于 Koharu 安装目录内的 `store` 目录。项目位于 `Documents/Koharu`，设置位于 `~/.koharu/config.toml`。详见[数据位置](/zh/reference/data)。
 
 下载会先暂存，再发布到缓存。中断后可以在下次启动或使用模型时重试。
 

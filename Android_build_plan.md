@@ -7,7 +7,7 @@ what "done" means.
 - **Repository:** `/home/shadman/Koharu/koharu`
 - **Baseline:** `main` @ `88d07ef0`, workspace version `0.83.5`, Tauri `3.0.0-alpha.5`
   (git rev `40a2d81d97f5c950e892fa7a6ce8b03064410c4d`), CEF runtime on desktop.
-- **Status date:** 2026-10-21
+- **Status date:** 2026-10-22
 - **Current state:** M1 platform services have landed on the `android` branch: the
   `koharu-android` plugin crate (SAF import/export, share sheet, Keystore, foreground
   service, back button), the `koharu-app` picker/export abstraction, installable secrets
@@ -15,10 +15,14 @@ what "done" means.
   Rust graph and the debug APK both build. M2 code has landed: a bundled Android llama
   package, the Android CPU/Vulkan hardware probe, tolerant runtime discovery, the mobile
   load profile with RAM-class budget checks, the bindgen Android loader arm, and a
-  benchmark harness; `cargo ndk check -p koharu` is green. Device verification of the M1
-  and M2 exit criteria (real Gemma 4 E4B translation, benchmark numbers) is open. The port
-  targets Android and desktop; a non-Android mobile build compiles with the pre-M1 "picker
-  unavailable" behavior but is not supported.
+  benchmark harness; `cargo ndk check -p koharu` is green. M3 code has landed: the bundled
+  `Torch::AndroidCpu` runtime, the mobile one-resident-stage memory policy with CPU-lane OOM
+  recovery, PP-DocLayoutV3/YOLO26s wired into the detection contract with platform-aware
+  mobile defaults (YOLO26s detection, Manga OCR, AOT inpainting), and the `koharu-pipeline`
+  `parity` harness. Device verification of the M1–M3 exit criteria (real E4B translation,
+  on-device pipeline, benchmark and parity numbers) and the external `koharu-rs/torch`
+  Android asset are open. The port targets Android and desktop; a non-Android mobile build
+  compiles with the pre-M1 "picker unavailable" behavior but is not supported.
 
 ## How to use this document
 
@@ -151,9 +155,14 @@ the vision path is enabled.
 
 | Device RAM | Translation | Detection | OCR | Inpaint | Peak budget |
 |---|---|---|---|---|---|
-| 6–8 GB | Gemma 4 E2B Q2_K_XL (2.19 GB) | PP-DocLayout / YOLO26s | PP-OCRv6 rec (0.08 GB) / MangaOCR (0.46 GB) | AOT (0.02 GB) | ~3.5 GB |
-| 8–12 GB | **Gemma 4 E4B Q2_K_XL (3.22 GB)** | PP-DocLayoutV3 (0.13 GB) | MangaOCR / PaddleOCR-VL GGUF (1.82 GB) | AOT / LaMa (0.20 GB) | ~4.5 GB |
-| 12–16 GB | **Gemma 4 E4B Q4_K_XL (4.22 GB)** | RF-DETR Seg 2XL (0.16 GB) | PaddleOCR-VL GGUF / MangaOCR | LaMa | ~5.5 GB |
+| 6–8 GB | Gemma 4 E2B Q2_K_XL (2.19 GB) | YOLO26s (0.046 GB) | PP-OCRv6 rec (0.08 GB) / MangaOCR (0.46 GB) | AOT (0.02 GB) | ~3.5 GB |
+| 8–12 GB | **Gemma 4 E4B Q2_K_XL (3.22 GB)** | YOLO26s (0.046 GB) | MangaOCR (0.46 GB) / PaddleOCR-VL GGUF (1.82 GB) | AOT (0.02 GB) | ~4.5 GB |
+| 12–16 GB | **Gemma 4 E4B Q4_K_XL (4.22 GB)** | YOLO26s / RF-DETR Seg 2XL (0.16 GB) | PaddleOCR-VL GGUF / MangaOCR | AOT / LaMa (0.20 GB) | ~5.5 GB |
+
+M3 ships **one platform-agnostic mobile default** (YOLO26s detection, Manga OCR, AOT
+inpainting) via `DetectionModel`/`OcrModel`/`InpaintingModel::default_for_platform()`, not
+per-RAM-class selection. The heavier detectors (RF-DETR Seg 2XL, PP-DocLayoutV3) and LaMa
+stay user-selectable; wiring the RAM class to the defaults is future work (M5).
 
 Reference weights (from `crates/koharu-translator/src/local/catalog.rs` and the
 `koharu-ml` model repositories):
@@ -304,24 +313,39 @@ and no OOM.
 
 **Goal:** detection + OCR + inpainting on-device, unattended batch runs.
 
+- [x] Android arms in `Torch::discover` / `library_names()`; map `Vulkan` → CPU until validated
+      (`Torch::AndroidCpu` is a bundled package: no download, bare sonames, empty dependencies)
+- [x] Mobile memory policy: one resident stage, evict between stages; extend CPU-lane OOM
+      `recover()` (`pipeline/src/accelerator.rs`) to unload other models and retry once
+      (`AcceleratorGate` now serializes on mobile via `MemoryPolicy::for_platform()` and evicts
+      other stages before every load; `recover()` no longer short-circuits on the CPU lane)
+- [x] Detection model decision. Wire PP-DocLayoutV3 (0.13 GB) / YOLO26s (0.046 GB) into the
+      same output contract (text/onomatopoeia/bubble/panel + masks). The detection stage now
+      normalizes every detector onto a pipeline-owned record; YOLO26s maps `balloon`/`frame`/
+      `text` → bubble/panel/text and PP-DocLayoutV3 rasterizes its polygon masks, keeping only
+      text regions. Mobile default is Comic Layout YOLO26s (comic-native classes, smallest
+      footprint); RF-DETR Seg 2XL stays the desktop default. **Quality vs latency pick still
+      needs the reference devices** (M2/M5 benchmark item).
+- [x] Selectable mobile defaults in `pipeline/src/config.rs`; AOT default inpainting, LaMa optional
+      (`DetectionModel`/`OcrModel`/`InpaintingModel::default_for_platform()`)
+- [x] OCR defaults: MangaOCR on mobile, PaddleOCR-VL on desktop (reuses the llama runtime, no
+      torch). Per-page language selection is not implemented; the mobile default assumes the
+      Japanese manga target.
 - [ ] Cross-compile torch 2.13 (`libtorch_cpu.so`) + `libkoharu-torch.so` for
       `aarch64-linux-android`; publish to `koharu-rs/torch`; bundle via jniLibs or an AAB
       feature module
-- [ ] Android arms in `Torch::discover` / `library_names()`; map `Vulkan` → CPU until validated
-- [ ] Mobile memory policy: one resident stage, evict between stages; extend CPU-lane OOM
-      `recover()` (`pipeline/src/accelerator.rs:39-48`) to unload other models and retry once
-- [ ] Detection model decision. RF-DETR Seg 2XL is the only pipeline-selectable detector and
-      runs at 1152²; either run it at reduced resolution or wire PP-DocLayoutV3 (0.13 GB) /
-      YOLO26s (0.046 GB) into the same output contract (text/onomatopoeia/bubble/panel + masks).
-      Two-way spike, pick on quality vs latency.
-- [ ] Selectable mobile defaults in `pipeline/src/config.rs`; AOT default inpainting, LaMa optional
-- [ ] OCR defaults: MangaOCR for Japanese, PaddleOCR-VL GGUF for other scripts (reuses the
-      llama runtime, no torch)
+      — external to this repository; the consumer side is done and `cargo ndk check -p koharu`
+      is green. The APK needs both libraries in `jniLibs` before a device run. The published
+      asset's `DT_NEEDED` set (including any OpenMP runtime) must match the `android` props in
+      `runtime/packages/torch.rs`, which currently mirrors the Linux list without `libgomp`.
 - [ ] Parity check: 5-page set, desktop vs Android → boxes, masks, OCR text, translations;
       record diffs
+      — the `koharu-pipeline` `parity` bin landed (JSON report); the two reports need the
+      reference device
 
 **Exit criteria:** a chapter processes unattended with no OOM kills and a parity report is
-attached to the milestone.
+attached to the milestone. Open: the external `koharu-rs/torch` asset, a physical-device run,
+and the recorded parity/benchmark numbers.
 
 ---
 
@@ -446,9 +470,13 @@ dev server over the network, set `TAURI_DEV_HOST` to the host LAN address instea
 
 ## Open questions
 
-- Detection: reduced-resolution RF-DETR vs. wiring PP-DocLayoutV3/YOLO26s (decided in M3).
+- Detection: wiring landed for all three detectors; the mobile default is YOLO26s. The final
+  quality-vs-latency pick still needs the reference-device numbers (M2/M5).
 - Whether to ship Vulkan at all on Android, or CPU-only for v1 (decided in M2 benchmarks).
 - APK size budget if libtorch cannot be trimmed: AAB feature module vs. Play asset delivery.
+  Still open until the `koharu-rs/torch` Android asset exists.
+- OCR language selection: the mobile default is Manga OCR (Japanese). Auto-selecting
+  MangaOCR vs. PaddleOCR-VL GGUF per page language is not implemented.
 
 ---
 
@@ -467,3 +495,5 @@ and what the next session should pick up.
 | 2026-10-21 | M1 review fixes | Corrected the review findings: the import picker no longer MIME-filters (it hid `.cbz`/`.rar`); an undecryptable Keystore entry is dropped and reported unset instead of failing `Preferences::load`; `POST_NOTIFICATIONS` is requested at the first foreground start; the foreground refcount lock spans the count and the start/stop send, removing the stop-after-start race; notification text is data only and its title falls back to the application label; the back registry closes Settings with a save and the delete confirmation before backgrounding, and uses `dispatch`; non-Android mobile compiles again with the pre-M1 "picker unavailable" arms. Also removed the stale plugin `settings.gradle`, the unused `serde_json` dependency, and made the service instance `@Volatile`. | Same as M1: device verification, then M2 |
 | 2026-10-21 | M2 code | `koharu-runtime`: the Android probe always exposes a CPU device (memory from `/proc/meminfo`) and a Vulkan device only when the `runtime` config section sets `android_vulkan`; `Llama::AndroidCpu`/`AndroidVulkan` are bundled (no download, dlopen by soname); `Runtime::discover` now skips requested features with no package and exposes `Runtime::features()`; bundled loader falls back to the bare soname. `koharu-bindgen`: the `RTLD_NOLOAD` already-loaded arm covers `android`, and the three `-sys` crates declare `libc` for Android. `koharu-ml`: `llm::profile` owns the RAM classes/budgets, the mobile load profile (mmap, q8 KV, performance-core threads, capped context/tokens) and a budget guard; `koharu-ml::init` initializes only the backends that resolved. `koharu-translator`: the local translator applies the mobile profile; a new `bench` bin reports tok/s, page latency, peak RSS, and thermal status. Docs: Android section in `hardware.mdx` (en/ja/zh). Verified: `cargo check` for the four crates, `cargo ndk -t arm64-v8a check -p koharu`, and the focused `koharu-ml` `llm::` tests (10 pass). | Publish the `aarch64-linux-android` llama libs, install on a physical phone, run the WebGPU probe and the `bench` harness, then fill the hardware table |
 | 2026-10-21 | M2 review fixes | The Vulkan setting is now meaningful: the loader no longer forces `gpu_layers = 0`, so the CPU path runs zero layers and the opt-in Vulkan device offloads. The forced `n_ctx`/`max_tokens` caps were removed (context derives from the prompt) so long pages no longer hard-fail or truncate; the performance-core thread fallback no longer uses every core; the budget guard now counts the mmproj projector; the benchmark harness applies the mobile profile; `loader::load` only falls back to a bare soname on Android; discovery logs skipped features. Docs: `hardware.mdx` (en/ja/zh) now states the milestone covers translation and documents the `[runtime] android_vulkan` key, and the M2 profile item matches the loader. Verified: focused `koharu-ml` `llm::` tests and `cargo check`. | Publish the Android llama libs and verify on a physical phone |
+| 2026-10-22 | M3 review fixes | `koharu-runtime`: `Plan::initialize` now activates every reachable package in dependency order and skips (with a warning) any that fail to load, so a missing or mismatched bundled runtime can no longer abort the runtimes that did load — this removes the coupling where a missing `libtorch` took the llama/translation backend down with it. `Runtime::features()` now reports the packages that actually activated, and `koharu-ml::init` reads it after `initialize()`. `parity` bin: dropped the always-null `bubble-mask` field and the run-specific `revision` field, and pins greedy decoding (`temperature 0`, `top_k 1`) so the report is diffable across devices. Plan: reconciled the mobile profile table with the single platform default (YOLO26s / Manga OCR / AOT), fixed the `cargo ndk` typo, and noted the bundled Torch `DT_NEEDED`/OpenMP caveat. Verified: `cargo check -p koharu-app`, `cargo test -p koharu-runtime -p koharu-pipeline --lib`, `cargo ndk check -p koharu`. | Build and publish the preview APK, then run the parity/bench harness on a device |
+| 2026-10-22 | M3 code | `koharu-runtime`: `Torch::AndroidCpu` is a bundled package (bare sonames, empty dependencies) and `discover()` maps Android to CPU (Vulkan→CPU until validated); `koharu-ml/src/lib.rs` comment updated. `koharu-pipeline`: the detection stage now normalizes every detector onto a pipeline-owned `Detection`/`DetectionMask`/`Detections` record — RF-DETR is copied, YOLO26s maps `balloon`/`frame`/`text` → bubble/panel/text, PP-DocLayoutV3 rasterizes its polygon masks and keeps only text regions; `DetectionModel`/`OcrModel`/`InpaintingModel` gained platform-aware defaults (Android: YOLO26s, Manga OCR, AOT; desktop unchanged) with new `PpDocLayoutV3Config`/`ComicLayoutYolo26sConfig` profiles and processor keys; `AcceleratorGate` takes a `MemoryPolicy` — mobile serializes the lane and evicts other stages before every load, and `recover()` no longer skips the CPU lane; the `run` bin gained the two new detection choices and a new `parity` bin dumps boxes/mask digests/OCR/translations to JSON. `koharu-app` remembers the new detection profiles. Frontend: the detection picker gained both models with a threshold field, `packages/bridge/src/protocol.ts` regenerated, and the `threshold` label added to all 11 locales. Docs: `hardware.mdx` (en/ja/zh) describes the mobile defaults, one-resident-stage policy, bundled Torch runtime, and the parity harness. Verified: `cargo check -p koharu-app`, `cargo test -p koharu-pipeline --lib` (53 pass), `cargo ndk -t arm64-v8a check -p koharu` (green; pre-existing Android VRAM dead-code warnings only), oxlint, `tsc --noEmit`, and the editor component tests (50 pass). Not verified: no device run and no `koharu-rs/torch` Android asset yet. | Publish the `aarch64-linux-android` torch libs, run the pipeline and `parity`/`bench` on a physical phone, attach the parity report, then start M4 |

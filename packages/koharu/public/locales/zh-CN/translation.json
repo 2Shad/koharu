@@ -389,7 +389,8 @@
         "negativePrompt": "负面提示词",
         "panelThreshold": "分镜阈值",
         "prompt": "提示词",
-        "textThreshold": "文本阈值"
+        "textThreshold": "文本阈值",
+        "threshold": "阈值"
       },
       "processing": "正在处理",
       "stages": {

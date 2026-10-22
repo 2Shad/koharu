@@ -139,6 +139,18 @@ function ModelOptions({
           />
         </div>
       )
+    case 'comic-layout-yolo26s':
+    case 'pp-doclayout-v3':
+      return (
+        <NumberField
+          label={t('settings.pipeline.options.threshold')}
+          value={model.threshold ?? null}
+          min={0}
+          max={1}
+          step={0.05}
+          onChange={(threshold) => onChange({ ...model, threshold })}
+        />
+      )
     case 'flux2-klein':
       return (
         <TextField
