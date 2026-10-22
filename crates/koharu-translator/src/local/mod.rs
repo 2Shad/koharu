@@ -38,7 +38,14 @@ impl LocalTranslator {
         let options = LoadOptions {
             mtmd: resolved.projector.map(MtmdOptions::new),
             // Android loads through the lean mobile profile; `None` on desktop.
-            profile: LoadProfile::for_device(),
+            // The opt-in battery-saver dimension is only consulted there.
+            profile: LoadProfile::for_device().map(|profile| {
+                if koharu_runtime::battery_saver_enabled() {
+                    profile.power_saver()
+                } else {
+                    profile
+                }
+            }),
             ..LoadOptions::default()
         };
         let llm = Llm::load_with_options(device, resolved.model, options)

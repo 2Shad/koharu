@@ -26,6 +26,9 @@ icon: 'download'
       <Tab title="Linux">
         选择适合发行版和处理器的软件包，并安装包管理器提示缺少的桌面库。
       </Tab>
+      <Tab title="Android">
+        下载 `arm64-v8a` 的 APK，然后从浏览器或文件管理器打开。首次安装时 Android 会要求允许来自该来源的应用安装。该版本面向 Android 12（API 31）及更高版本。
+      </Tab>
     </Tabs>
 
   </Step>
@@ -45,3 +48,21 @@ icon: 'download'
 发行版会在启动时检查一次带签名的 GitHub 更新源，没有手动检查更新的功能。出现更新提示后，请等待下载完成，之后 Koharu 会重新启动。
 
 <Tip>日常翻译使用发行版。需要修改代码时，请参考[开发环境](/zh/development/setup)。</Tip>
+
+## Android
+
+通过侧载安装 APK：下载后从浏览器或文件管理器打开，并在 Android 提示时允许来自该来源的应用安装。该构建仅支持 `arm64-v8a`，需要 Android 12（API 31）或更高版本。
+
+首个 Android 发行版完全离线运行。检测、OCR、翻译和修补均在设备上执行，准备好模型权重后无需网络。llama.cpp（`libllama`、`libmtmd`）与 LibTorch（`libtorch_cpu`、`libkoharu-torch`）等原生运行时随 APK 一同打包，并从应用的本地库目录加载。Koharu 在 Android 上不会下载可执行代码，只会在首次使用模型时获取模型权重。
+
+### 支持的设备
+
+需要 64 位 ARM 手机和至少 6 GB 内存。管线一次只常驻一个阶段模型，因此峰值内存取决于最大的单个模型，而非总和。
+
+| 设备等级 | RAM   | 翻译                | 状态             |
+| -------- | ----- | ------------------- | ---------------- |
+| 中端     | 8 GB  | Gemma 4 E4B Q2_K_XL | 待参考设备实测   |
+| 旗舰     | 12 GB | Gemma 4 E4B Q4_K_XL | 待参考设备实测   |
+| 下限     | 6 GB  | Gemma 4 E2B Q2_K_XL | 待参考设备实测   |
+
+上表为目标值而非实测结果。完整的配置表与基准测试工具见[硬件与运行时](/zh/hardware#android)。

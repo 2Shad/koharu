@@ -254,6 +254,7 @@
     "github": "GitHub",
     "help": "說明",
     "import": "匯入頁面",
+    "more": "更多",
     "process": "處理",
     "processLayers": "處理所選圖層",
     "processPages": "處理所選頁面",
@@ -262,6 +263,7 @@
     "runPhase": "執行{{phase}}",
     "selectAllLayers": "選取所有圖層",
     "settings": "設定",
+    "share": "分享",
     "undo": "復原",
     "view": "檢視"
   },
@@ -293,6 +295,7 @@
     "layerCount": "{{count}} 個圖層",
     "layerCount_one": "{{count}} 個圖層",
     "layerCount_other": "{{count}} 個圖層",
+    "multiSelect": "多選",
     "noImage": "無影像",
     "noResults": "沒有符合此篩選條件的頁面。",
     "pageName": "頁面名稱",
@@ -300,6 +303,7 @@
     "rename": "重新命名",
     "renameDescription": "為此頁面選擇新名稱。",
     "renameTitle": "重新命名頁面",
+    "reorder": "重新排序 {{page}}",
     "selected": "已選擇 {{count}}"
   },
   "outputPicker": {

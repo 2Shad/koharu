@@ -91,6 +91,7 @@ pub fn bindings() -> tauri_specta::Builder<tauri::DynRuntime> {
             processing::process,
             processing::stop_job,
             output::export,
+            output::share,
             output::get_thumbnail,
             fonts::get_fonts,
             fonts::get_font_preview,

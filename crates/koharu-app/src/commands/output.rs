@@ -120,6 +120,65 @@ pub(crate) async fn export(
     Ok(())
 }
 
+/// Renders one page to a PNG in the app cache and hands it to the system share sheet.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn share(
+    page: EntityId,
+    window: WebviewWindow,
+    project: State<'_, CurrentProject>,
+    desktop: State<'_, Desktop>,
+) -> std::result::Result<(), Error> {
+    let snapshot = project
+        .project
+        .lock()
+        .await
+        .as_ref()
+        .context("no project is open")?
+        .snapshot();
+    snapshot.page(page)?;
+    let frame = desktop.renderer().render(&snapshot, page).await?;
+    let image = rasterize(
+        desktop.rasterizer().await?,
+        &frame,
+        RasterOptions::default(),
+    )
+    .await?
+    .image;
+    let bytes = tokio_rayon::spawn(move || -> Result<Vec<u8>> {
+        let mut bytes = Vec::new();
+        PngEncoder::new_with_quality(&mut bytes, CompressionType::Best, FilterType::Adaptive)
+            .write_image(
+                image.as_raw(),
+                image.width(),
+                image.height(),
+                ExtendedColorType::Rgba8,
+            )?;
+        Ok(bytes)
+    })
+    .await?;
+    share_bytes(&window, page, bytes).await?;
+    Ok(())
+}
+
+#[cfg(target_os = "android")]
+async fn share_bytes(window: &WebviewWindow, page: EntityId, bytes: Vec<u8>) -> Result<()> {
+    use tauri::Manager as _;
+
+    let path = window
+        .path()
+        .app_cache_dir()?
+        .join(format!("share-{page}.png"));
+    std::fs::write(&path, bytes)?;
+    let android = window.state::<koharu_android::Android>().inner().clone();
+    android.share(vec![path], "image/png").await
+}
+
+#[cfg(not(target_os = "android"))]
+async fn share_bytes(_window: &WebviewWindow, _page: EntityId, _bytes: Vec<u8>) -> Result<()> {
+    anyhow::bail!("sharing is unavailable on this platform")
+}
+
 /// Writes the encoded pages to the destination.
 ///
 /// Android destinations are content URIs, so the files are staged in the app cache and handed to

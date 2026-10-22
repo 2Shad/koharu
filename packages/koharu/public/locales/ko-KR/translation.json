@@ -254,6 +254,7 @@
     "github": "GitHub",
     "help": "도움말",
     "import": "페이지 가져오기",
+    "more": "더 보기",
     "process": "처리",
     "processLayers": "선택한 레이어 처리",
     "processPages": "선택한 페이지 처리",
@@ -262,6 +263,7 @@
     "runPhase": "{{phase}} 실행",
     "selectAllLayers": "모든 레이어 선택",
     "settings": "설정",
+    "share": "공유",
     "undo": "실행 취소",
     "view": "보기"
   },
@@ -293,6 +295,7 @@
     "layerCount": "레이어 {{count}}개",
     "layerCount_one": "레이어 {{count}}개",
     "layerCount_other": "레이어 {{count}}개",
+    "multiSelect": "다중 선택",
     "noImage": "이미지 없음",
     "noResults": "필터와 일치하는 페이지가 없습니다.",
     "pageName": "페이지 이름",
@@ -300,6 +303,7 @@
     "rename": "이름 바꾸기",
     "renameDescription": "이 페이지의 새 이름을 정하세요.",
     "renameTitle": "페이지 이름 바꾸기",
+    "reorder": "{{page}} 순서 변경",
     "selected": "{{count}}개 선택됨"
   },
   "outputPicker": {

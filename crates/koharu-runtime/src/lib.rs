@@ -8,7 +8,7 @@ mod store;
 pub mod download;
 
 pub use device::{Backend, Device, DeviceType};
-pub use hardware::Hardware;
+pub use hardware::{Hardware, battery_saver_enabled};
 pub use runtime::{Feature, Package, Runtime, Torch};
 pub use source::HuggingFaceFile;
 pub use store::Store;

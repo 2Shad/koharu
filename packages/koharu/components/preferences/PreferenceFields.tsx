@@ -3,7 +3,9 @@
 import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { useKoharuStore } from '@/lib/store'
 import { Input } from '@koharu/ui/components/input'
+import { cn } from '@koharu/ui/lib/utils'
 
 export function PreferencePage({
   title,
@@ -86,13 +88,20 @@ export function TextField({
   type?: 'text' | 'url'
   onChange: (value: string) => void
 }) {
+  const mobile = useKoharuStore((state) => state.platform) === 'mobile'
   return (
     <label className='grid gap-1 text-[10px] text-muted-foreground'>
       {label}
       <Input
         type={type}
         value={value}
-        className='h-8 text-[12px] text-foreground'
+        inputMode={type === 'url' ? 'url' : 'text'}
+        autoComplete='off'
+        autoCapitalize='none'
+        autoCorrect='off'
+        spellCheck={false}
+        enterKeyHint='done'
+        className={cn('text-[12px] text-foreground', mobile ? 'h-11' : 'h-8')}
         onChange={(event) => onChange(event.currentTarget.value)}
       />
     </label>
@@ -129,6 +138,7 @@ export function NumberField({
   onChange: (value: number | null) => void
 }) {
   const { t } = useTranslation()
+  const mobile = useKoharuStore((state) => state.platform) === 'mobile'
   const id = useId()
   return (
     <label className='grid gap-1 text-[10px] text-muted-foreground'>
@@ -140,8 +150,10 @@ export function NumberField({
         min={min}
         max={max}
         step={step}
+        inputMode='decimal'
+        enterKeyHint='done'
         placeholder={t('model.default')}
-        className='h-8 text-[12px] text-foreground'
+        className={cn('text-[12px] text-foreground', mobile ? 'h-11' : 'h-8')}
         onChange={(event) => onChange(parseBounded(event.currentTarget.value, min, max))}
       />
     </label>

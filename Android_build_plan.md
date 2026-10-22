@@ -353,22 +353,29 @@ and the recorded parity/benchmark numbers.
 
 **Goal:** import → edit → typeset → export, one-handed.
 
-- [ ] Mobile app bar + overflow menu; desktop shortcut labels (window chrome and updater are already hidden on mobile in M0)
-- [ ] Canvas-first layout; Pages/Inspector/Agent/Activity become bottom sheets
+- [x] Mobile app bar + overflow menu; desktop shortcut labels (window chrome and updater are already hidden on mobile in M0)
+      (`MobileAppBar.tsx`: title, Pages/Inspector/Activity toggles, Import/Export/Share/Undo/Redo/Settings/Close overflow; no accelerator labels)
+- [x] Canvas-first layout; Pages/Inspector/Agent/Activity become bottom sheets
       (`packages/ui` already ships `sheet.tsx`, `drawer.tsx`, `sidebar.tsx`);
       horizontal bottom toolbar; compact status bar
-- [ ] Gestures in `CanvasWorkspace.tsx`: pinch-zoom, two-finger pan, long-press, touch slop,
+      (`MobileSheets.tsx` opens `PageRail`/`Inspector`/`ActivityBody`; desktop keeps the 18/58/24 panes)
+- [x] Gestures in `CanvasWorkspace.tsx`: pinch-zoom, two-finger pan, long-press, touch slop,
       guard against a second pointer; keep single-finger draw
-- [ ] Touch-sized targets (≥44 px hit area, visual size unchanged) in `SelectionControls.tsx`,
+      (touch path is `pointerType === 'touch'`-gated, so mouse/trackpad is unchanged)
+- [x] Touch-sized targets (≥44 px hit area, visual size unchanged) in `SelectionControls.tsx`,
       `Inspector.tsx`, `ToolBar.tsx`; explicit multi-select mode instead of Shift/Ctrl;
       pointer-based page reorder; explicit rename
-- [ ] Keyboard-aware text editing (canvas overlay or bottom sheet); `dvh`; viewport metadata
-- [ ] Hide the Agent panel on Android v1 (commands stay compiled)
-- [ ] Locale keys for every new string in all 11 locales
+- [x] Keyboard-aware text editing (canvas overlay or bottom sheet); `dvh`; viewport metadata
+      (Inspector opens as a bottom sheet; `interactive-widget=resizes-content` + `dvh`)
+- [x] Hide the Agent panel on Android v1 (commands stay compiled)
+- [x] Locale keys for every new string in all 11 locales (`menu.share`, `menu.more`,
+      `navigator.multiSelect`, `navigator.reorder`)
 - [ ] Screenshots at 360×800, 412×915, 800×1280 (plus a long-label case)
+      — not captured: needs a device/emulator or a browser harness that can run the
+      Tauri-backed build. This is the remaining M4 exit gate.
 
 **Exit criteria:** a page can be imported, edited, typeset, and exported on a phone without
-a keyboard, mouse, or hover.
+a keyboard, mouse, or hover. Code is in place; the on-device pass and screenshots are open.
 
 ---
 
@@ -376,18 +383,29 @@ a keyboard, mouse, or hover.
 
 - [ ] Reference devices: 8 GB mid-range, 12 GB flagship, 6 GB floor
 - [ ] Sustained 10-page run: thermal throttling, LMK behavior, battery drain
-- [ ] Battery-saver profile (fewer threads, smaller quant, lower concurrency)
+- [x] Battery-saver profile (fewer threads, smaller quant, lower concurrency)
+      (`koharu-ml` `LoadProfile::power_saver` halves decode/prompt threads and
+      batch/ubatch and trims the resident budget 25%; opt in with `[runtime]
+      battery_saver = true`, resolved by `koharu-runtime` and applied by the local
+      translator. Off by default; desktop is unchanged)
 - [ ] Decide whether RF-DETR survives on mobile; publish the supported matrix
+      (the docs matrix is a placeholder pending the reference-device runs)
 
 ---
 
 ### M6 — Release
 
-- [ ] CI Android job: JDK, SDK, NDK, `tauri android build`, AAB/APK artifacts, keystore
+- [x] CI Android job: JDK, SDK, NDK, `tauri android build`, AAB/APK artifacts, keystore
       signing, `versionCode` synced from release-please
+      (a `release` job in `.github/workflows/android.yml`; signing via a Gradle init script
+      and the workspace version via `cargo metadata` + `--config`. The preview `build` job
+      publishes the debug APK on `android-m*` tags; the signed AAB job still needs the
+      `ANDROID_KEYSTORE_*`/`SENTRY_*` secrets and has not run)
 - [ ] Play internal track, arm64 ABI split, native symbol upload (`.github/sentry.sh` has no
       Android branch)
-- [ ] Docs: Android tab in `installation`, `hardware`, `quickstart` across en/ja/zh
+      — ABI split and the sentry Android branch landed; the Play internal-track upload is
+      manual (no publisher action is wired, per the no-new-third-party-actions rule)
+- [x] Docs: Android tab in `installation`, `hardware`, `quickstart` across en/ja/zh
 - [ ] Upstream discussion issue + split PR series (required by `CONTRIBUTING.md`)
 
 ---
@@ -497,3 +515,6 @@ and what the next session should pick up.
 | 2026-10-21 | M2 review fixes | The Vulkan setting is now meaningful: the loader no longer forces `gpu_layers = 0`, so the CPU path runs zero layers and the opt-in Vulkan device offloads. The forced `n_ctx`/`max_tokens` caps were removed (context derives from the prompt) so long pages no longer hard-fail or truncate; the performance-core thread fallback no longer uses every core; the budget guard now counts the mmproj projector; the benchmark harness applies the mobile profile; `loader::load` only falls back to a bare soname on Android; discovery logs skipped features. Docs: `hardware.mdx` (en/ja/zh) now states the milestone covers translation and documents the `[runtime] android_vulkan` key, and the M2 profile item matches the loader. Verified: focused `koharu-ml` `llm::` tests and `cargo check`. | Publish the Android llama libs and verify on a physical phone |
 | 2026-10-22 | M3 review fixes | `koharu-runtime`: `Plan::initialize` now activates every reachable package in dependency order and skips (with a warning) any that fail to load, so a missing or mismatched bundled runtime can no longer abort the runtimes that did load — this removes the coupling where a missing `libtorch` took the llama/translation backend down with it. `Runtime::features()` now reports the packages that actually activated, and `koharu-ml::init` reads it after `initialize()`. `parity` bin: dropped the always-null `bubble-mask` field and the run-specific `revision` field, and pins greedy decoding (`temperature 0`, `top_k 1`) so the report is diffable across devices. Plan: reconciled the mobile profile table with the single platform default (YOLO26s / Manga OCR / AOT), fixed the `cargo ndk` typo, and noted the bundled Torch `DT_NEEDED`/OpenMP caveat. Verified: `cargo check -p koharu-app`, `cargo test -p koharu-runtime -p koharu-pipeline --lib`, `cargo ndk check -p koharu`. | Build and publish the preview APK, then run the parity/bench harness on a device |
 | 2026-10-22 | M3 code | `koharu-runtime`: `Torch::AndroidCpu` is a bundled package (bare sonames, empty dependencies) and `discover()` maps Android to CPU (Vulkan→CPU until validated); `koharu-ml/src/lib.rs` comment updated. `koharu-pipeline`: the detection stage now normalizes every detector onto a pipeline-owned `Detection`/`DetectionMask`/`Detections` record — RF-DETR is copied, YOLO26s maps `balloon`/`frame`/`text` → bubble/panel/text, PP-DocLayoutV3 rasterizes its polygon masks and keeps only text regions; `DetectionModel`/`OcrModel`/`InpaintingModel` gained platform-aware defaults (Android: YOLO26s, Manga OCR, AOT; desktop unchanged) with new `PpDocLayoutV3Config`/`ComicLayoutYolo26sConfig` profiles and processor keys; `AcceleratorGate` takes a `MemoryPolicy` — mobile serializes the lane and evicts other stages before every load, and `recover()` no longer skips the CPU lane; the `run` bin gained the two new detection choices and a new `parity` bin dumps boxes/mask digests/OCR/translations to JSON. `koharu-app` remembers the new detection profiles. Frontend: the detection picker gained both models with a threshold field, `packages/bridge/src/protocol.ts` regenerated, and the `threshold` label added to all 11 locales. Docs: `hardware.mdx` (en/ja/zh) describes the mobile defaults, one-resident-stage policy, bundled Torch runtime, and the parity harness. Verified: `cargo check -p koharu-app`, `cargo test -p koharu-pipeline --lib` (53 pass), `cargo ndk -t arm64-v8a check -p koharu` (green; pre-existing Android VRAM dead-code warnings only), oxlint, `tsc --noEmit`, and the editor component tests (50 pass). Not verified: no device run and no `koharu-rs/torch` Android asset yet. | Publish the `aarch64-linux-android` torch libs, run the pipeline and `parity`/`bench` on a physical phone, attach the parity report, then start M4 |
+| 2026-10-22 | M6 release config | Added a `release` job to `.github/workflows/android.yml` (the preview job keeps its behavior, gated to branch/PR/`android-m*` refs): JDK 21 + Android SDK + NDK r27c, reads the workspace version with `cargo metadata` and passes it as `--config '{"version":…}'` so Tauri derives `versionName`/`versionCode` from the release-please bump (the Android generator otherwise fell back to `1`/`1.0`), builds `--target aarch64 --split-per-abi`, injects the release keystore through a `$HOME/.gradle/init.d` init script (no hand-edit of `gen/android`), and uploads the AAB + APK artifacts. Added an `android` branch to `.github/sentry.sh` (invoked as `bash .github/sentry.sh android`) that uploads the unstripped `jniLibs/arm64-v8a/libkoharu*.so`, `libllama*.so`, `libmtmd.so`, and `libtorch*.so`; the macOS/Windows/Linux branches are unchanged. Docs: Android tab + supported-device matrix in `installation.mdx` (en/ja/zh), Android project/import/export note in `quickstart.mdx` (en/ja/zh), and a pending-numbers note in `hardware.mdx` (en/ja/zh). Not verified: CI has not run; keystore secrets, a Play service account, and the reference devices are still needed. Play internal-track upload is manual (no publisher action is wired). | Configure the `ANDROID_KEYSTORE_*`/`SENTRY_*` secrets, add the `gh workflow run android.yml --ref "$TAG"` dispatch to `release-pr.yml`, run the workflow on a release tag, and publish the AAB to the Play internal track |
+| 2026-10-22 | M4 + M5 code | M4 touch UI: `CanvasWorkspace` gained a `pointerType === 'touch'` gesture path (8 px slop so a tap cannot paint, long-press selection, pinch-zoom + two-finger pan reusing `clampCameraTranslation`, second/third-pointer guards) and mouse/trackpad is byte-for-byte unchanged; `SelectionControls` handles have 44 px transparent hit boxes with the visual knob unchanged; `ToolBar`/`StatusBar` become a horizontal bottom toolbar and compact bar on mobile. Mobile shell: `Editor` branches on platform (`MobileEditor` = app bar + canvas + bottom sheets), new `MobileAppBar` (Pages/Inspector/Activity toggles plus Import/Export/Share/Undo/Redo/Settings/Close overflow) and `MobileSheets` (Pages/Inspector/Activity as `Sheet side='bottom'`, Android back closes the open sheet), `store.mobilePanel`, `ActivityBody`/`useActivityCount` extracted, `dvh` + a Next `viewport` export with `interactive-widget=resizes-content`, Agent hidden on mobile. Panels: `PageRail`/`Inspector`/preferences get ≥44 px targets, an explicit page multi-select toggle, pointer-based reorder (`elementFromPoint` → `commands.movePage`), always-visible actions and menu rename; desktop Shift/Ctrl/range and HTML5 drag are kept. New `share` typed command in `koharu-app` renders a page to app cache and calls `Android::share`; `packages/bridge/src/protocol.ts` regenerated. Locales: `menu.share`, `menu.more`, `navigator.multiSelect`, `navigator.reorder` added to all 11. M5: `LoadProfile::power_saver` in `koharu-ml` halves decode/prompt threads and batch/ubatch and trims the budget 25%; the `[runtime] battery_saver` key is owned and resolved by `koharu-runtime` (`battery_saver_enabled()`) and applied by the local translator. Off by default; desktop is unchanged. Verified: `tsc --noEmit` clean, oxlint clean (one pre-existing `clamp` warning in `ToolBar.tsx`), focused vitest `editor-components`/`workspace`/`canvas`/`localization` (78 pass), `cargo check -p koharu-app -p koharu-ml -p koharu-translator -p koharu-runtime`, focused `koharu-ml llm::` tests (12 pass), and `cargo ndk -t arm64-v8a check -p koharu` (green; pre-existing VRAM dead-code warnings only). Not verified: no device/emulator run and no screenshots at 360×800/412×915/800×1280. | Run the M4 exit criteria and capture screenshots on the emulator/phone; publish the `koharu-rs/{llama,torch}` Android assets; configure release secrets and run the CI release job |
+| 2026-10-22 | M4/M5/M6 review fixes | Applied the code-review findings. Rust: `cargo fmt` across the workspace (the modified `output.rs`/`lib.rs`/`local/mod.rs` plus three pre-existing unformatted files — `koharu-ml/llm/model.rs`, `koharu-runtime/runtime/packages/llama.rs`, `koharu-translator/bin/bench.rs`) so `cargo fmt -- --check` is green. Frontend: removed the unreachable `platform === 'mobile'` early return in `RightSidebar` (only mounted on desktop), deleted the dead `clamp` helper in `ToolBar`, and spaced the mobile rotate handle + raised corner-handle hit priority in `SelectionControls` so the 44 px boxes stop overlapping on small selections (desktop unchanged). Docs: documented the `[runtime] battery_saver` key in `hardware.mdx` (en/ja/zh) and dropped the outbound "share sheet" mention from the Android import note in `quickstart.mdx` (en/ja/zh). Plan: clarified the M6 CI note to distinguish the preview debug APK from the unrun signed AAB job. Verified: `cargo fmt --check`, `tsc --noEmit`, oxlint, focused vitest (editor-components + workspace), `cargo check`, `cargo ndk -t arm64-v8a check -p koharu`. Note on the earlier "importing files is not supported" report: that string came from the M0 preview, which shipped the `#[cfg(mobile)]` picker stub; M1 replaced it with the SAF `pickImport` implementation (`KoharuPlugin.kt`), so the current build imports through the system picker. | Test the preview APK on a physical phone; capture the M4 screenshots; publish the `koharu-rs/{llama,torch}` assets; configure the release secrets |

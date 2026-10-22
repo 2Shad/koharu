@@ -73,6 +73,7 @@ import {
 } from '@koharu/ui/components/select'
 import { Slider } from '@koharu/ui/components/slider'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@koharu/ui/components/tooltip'
+import { cn } from '@koharu/ui/lib/utils'
 
 const defaultFont: FontFamily = {
   name: 'CCWildWords',
@@ -110,14 +111,25 @@ const defaultTypography: Typography = {
 
 export function Inspector() {
   const { t } = useTranslation()
+  const mobile = useKoharuStore((state) => state.platform) === 'mobile'
   return (
     <aside className='flex h-full min-h-0 flex-col bg-[var(--surface-panel)]'>
-      <div className='flex h-8 shrink-0 items-center gap-1.5 border-b border-border/80 px-2'>
+      <div
+        className={cn(
+          'flex shrink-0 items-center gap-1.5 border-b border-border/80 px-2',
+          mobile ? 'h-11' : 'h-8',
+        )}
+      >
         <Type className='size-3 text-primary' />
         <h2 className='text-[10px] font-semibold'>{t('inspector.type')}</h2>
       </div>
 
-      <section className='h-48 min-w-0 shrink-0 overflow-hidden border-b'>
+      <section
+        className={cn(
+          'min-w-0 shrink-0 border-b',
+          mobile ? 'max-h-[55%] overflow-y-auto' : 'h-48 overflow-hidden',
+        )}
+      >
         <TypeInspector />
       </section>
 
@@ -130,6 +142,7 @@ export function Inspector() {
 
 function TypeInspector() {
   const { t } = useTranslation()
+  const mobile = useKoharuStore((state) => state.platform) === 'mobile'
   const borderWidthId = useId()
   const page = usePage().data
   const selectedIds = useKoharuStore((state) => state.selectedLayers)
@@ -259,7 +272,7 @@ function TypeInspector() {
               <SelectTrigger
                 size='sm'
                 aria-label={t('inspector.fontWeight')}
-                className='w-full min-w-0'
+                className={cn('w-full min-w-0', mobile && 'h-11')}
               >
                 <SelectValue />
               </SelectTrigger>
@@ -289,7 +302,7 @@ function TypeInspector() {
               <SelectTrigger
                 size='sm'
                 aria-label={t('inspector.fontStyle')}
-                className='w-full min-w-0'
+                className={cn('w-full min-w-0', mobile && 'h-11')}
               >
                 <SelectValue>{t(`inspector.fontStyles.${style}`)}</SelectValue>
               </SelectTrigger>
@@ -306,7 +319,12 @@ function TypeInspector() {
 
         <div className='grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(6.5rem,1fr)] gap-1.5'>
           <InspectorField label={t('inspector.alignment')}>
-            <div className='grid h-6 grid-cols-3 rounded-md border border-input bg-background p-px'>
+            <div
+              className={cn(
+                'grid grid-cols-3 rounded-md border border-input bg-background p-px',
+                mobile ? 'h-11' : 'h-6',
+              )}
+            >
               {(
                 [
                   [
@@ -361,7 +379,11 @@ function TypeInspector() {
                 }))
               }
             >
-              <SelectTrigger size='sm' aria-label={t('inspector.textDirection')} className='w-full'>
+              <SelectTrigger
+                size='sm'
+                aria-label={t('inspector.textDirection')}
+                className={cn('w-full', mobile && 'h-11')}
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -417,12 +439,18 @@ function TypeInspector() {
                 }
               }}
             >
-              <NumberFieldGroup>
-                <NumberFieldDecrement aria-label={t('inspector.decreaseBorderWidth')}>
+              <NumberFieldGroup className={cn(mobile && 'h-11')}>
+                <NumberFieldDecrement
+                  aria-label={t('inspector.decreaseBorderWidth')}
+                  className={cn(mobile && 'size-11')}
+                >
                   <Minus />
                 </NumberFieldDecrement>
                 <NumberFieldInput aria-label={t('inspector.borderWidth')} />
-                <NumberFieldIncrement aria-label={t('inspector.increaseBorderWidth')}>
+                <NumberFieldIncrement
+                  aria-label={t('inspector.increaseBorderWidth')}
+                  className={cn(mobile && 'size-11')}
+                >
                   <Plus />
                 </NumberFieldIncrement>
               </NumberFieldGroup>
@@ -492,6 +520,7 @@ function displayedLayers(layers: Layer[], page: EntityId) {
 
 function LayersInspector() {
   const { t } = useTranslation()
+  const mobile = useKoharuStore((state) => state.platform) === 'mobile'
   const page = usePage().data
   const selected = useKoharuStore((state) => state.selectedLayers)
   const selectLayers = useKoharuStore((state) => state.selectLayers)
@@ -614,6 +643,7 @@ function LayersInspector() {
                 layer={layer}
                 index={index}
                 depth={depth}
+                mobile={mobile}
                 selected={selected.includes(layer.id)}
                 expanded={!locked && expandedLayer === layer.id}
                 locked={locked}
@@ -644,6 +674,7 @@ function LayerRow({
   layer,
   index,
   depth,
+  mobile,
   selected,
   expanded,
   locked,
@@ -658,6 +689,7 @@ function LayerRow({
   layer: Layer
   index: number
   depth: number
+  mobile: boolean
   selected: boolean
   expanded: boolean
   locked: boolean
@@ -686,7 +718,10 @@ function LayerRow({
             aria-label={t('layers.edit', { name })}
             aria-expanded={locked ? undefined : expanded}
             disabled={locked}
-            className='flex min-w-0 flex-1 items-center gap-1.5 rounded-lg px-1.5 py-1 text-left hover:bg-foreground/[0.05] focus-visible:ring-2 focus-visible:ring-ring/25'
+            className={cn(
+              'flex min-w-0 flex-1 items-center gap-1.5 rounded-lg px-1.5 py-1 text-left hover:bg-foreground/[0.05] focus-visible:ring-2 focus-visible:ring-ring/25',
+              mobile && 'min-h-11',
+            )}
             onClick={onSelect}
           >
             <Icon className='size-3.5 shrink-0 text-muted-foreground' />
@@ -699,13 +734,23 @@ function LayerRow({
           </button>
           {!locked && (
             <div
-              className={`pointer-events-none absolute top-1/2 z-10 flex -translate-y-1/2 rounded-md bg-background/80 p-0.5 opacity-0 shadow-sm ring-1 ring-border/40 backdrop-blur-md transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100 motion-reduce:transition-none ${expanded ? 'right-7' : 'right-[3.25rem]'}`}
+              className={cn(
+                'flex items-center rounded-md bg-background/80 p-0.5 shadow-sm ring-1 ring-border/40 backdrop-blur-md',
+                // Touch has no hover, so the reorder controls stay inline and
+                // visible instead of floating over the row.
+                mobile
+                  ? 'relative shrink-0'
+                  : `pointer-events-none absolute top-1/2 z-10 -translate-y-1/2 opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100 motion-reduce:transition-none ${expanded ? 'right-7' : 'right-[3.25rem]'}`,
+              )}
             >
               <button
                 type='button'
                 aria-label={t('layers.moveUp', { name })}
                 disabled={reordering || !canMoveUp}
-                className='grid size-5 place-items-center rounded-sm text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/25 disabled:pointer-events-none disabled:opacity-30'
+                className={cn(
+                  'grid place-items-center rounded-sm text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/25 disabled:pointer-events-none disabled:opacity-30',
+                  mobile ? 'size-11' : 'size-5',
+                )}
                 onClick={() => onMove(-1)}
               >
                 <ArrowUp className='size-3' />
@@ -714,7 +759,10 @@ function LayerRow({
                 type='button'
                 aria-label={t('layers.moveDown', { name })}
                 disabled={reordering || !canMoveDown}
-                className='grid size-5 place-items-center rounded-sm text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/25 disabled:pointer-events-none disabled:opacity-30'
+                className={cn(
+                  'grid place-items-center rounded-sm text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/25 disabled:pointer-events-none disabled:opacity-30',
+                  mobile ? 'size-11' : 'size-5',
+                )}
                 onClick={() => onMove(1)}
               >
                 <ArrowDown className='size-3' />
@@ -747,7 +795,10 @@ function LayerRow({
               aria-label={
                 layer.visibility.visible ? t('layers.hide', { name }) : t('layers.show', { name })
               }
-              className='grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/25'
+              className={cn(
+                'grid shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/25',
+                mobile ? 'size-11' : 'size-6',
+              )}
               onClick={onToggle}
             >
               {layer.visibility.visible ? (
@@ -770,6 +821,7 @@ function LayerRow({
 
 function LayerEditor({ layer, onDelete }: { layer: Layer; onDelete?: () => void }) {
   const { t } = useTranslation()
+  const mobile = useKoharuStore((state) => state.platform) === 'mobile'
   const name = localizedLayerName(layer, 0, t)
   const [opacity, setOpacity] = useState(layer.visibility.opacity * 100)
 
@@ -811,7 +863,7 @@ function LayerEditor({ layer, onDelete }: { layer: Layer; onDelete?: () => void 
             max={100}
             step={1}
             value={opacity}
-            className='[&_[data-slot=slider-thumb]]:size-2'
+            className={cn(mobile ? '[&_[data-slot=slider-thumb]]:size-5' : '[&_[data-slot=slider-thumb]]:size-2')}
             onValueChange={previewOpacity}
             onValueCommitted={commitOpacity}
           />
@@ -828,7 +880,10 @@ function LayerEditor({ layer, onDelete }: { layer: Layer; onDelete?: () => void 
                   variant='ghost'
                   size='icon-xs'
                   aria-label={t('layers.delete', { name })}
-                  className='size-5 rounded-md text-muted-foreground hover:text-foreground'
+                  className={cn(
+                    'rounded-md text-muted-foreground hover:text-foreground',
+                    mobile ? 'size-11' : 'size-5',
+                  )}
                   onClick={onDelete}
                 />
               }
@@ -861,7 +916,10 @@ function LayerEditor({ layer, onDelete }: { layer: Layer; onDelete?: () => void 
                       variant='ghost'
                       size='xs'
                       aria-label={t('inspector.resetAutoFit')}
-                      className='ml-auto h-5 gap-1 rounded-md px-1.5 text-[9px] font-normal text-muted-foreground hover:text-foreground'
+                      className={cn(
+                        'ml-auto gap-1 rounded-md px-1.5 text-[9px] font-normal text-muted-foreground hover:text-foreground',
+                        mobile ? 'h-11' : 'h-5',
+                      )}
                       onClick={resetTextFrame}
                     />
                   }
@@ -878,7 +936,10 @@ function LayerEditor({ layer, onDelete }: { layer: Layer; onDelete?: () => void 
               data-testid={`edit-source-${layer.id}`}
               aria-label={t('layers.sourceLabel', { name })}
               wrap='soft'
-              className='max-h-14 min-h-8 w-full max-w-full min-w-0 resize-y overflow-y-auto rounded-md bg-background px-1.5 py-1 text-[12px] leading-4 md:text-[12px]'
+              className={cn(
+                'max-h-14 w-full max-w-full min-w-0 resize-y overflow-y-auto rounded-md bg-background px-1.5 py-1 text-[12px] leading-4 md:text-[12px]',
+                mobile ? 'min-h-11' : 'min-h-8',
+              )}
               value={layer.content.source?.text ?? ''}
               onCommit={(text) =>
                 void call(commands.setSourceText, layer.id, text)
@@ -892,7 +953,10 @@ function LayerEditor({ layer, onDelete }: { layer: Layer; onDelete?: () => void 
               data-testid={`edit-translation-${layer.id}`}
               aria-label={t('layers.translationLabel', { name })}
               wrap='soft'
-              className='max-h-16 min-h-9 w-full max-w-full min-w-0 resize-y overflow-y-auto rounded-md border-primary/25 bg-background px-1.5 py-1 text-[12px] leading-4 md:text-[12px]'
+              className={cn(
+                'max-h-16 w-full max-w-full min-w-0 resize-y overflow-y-auto rounded-md border-primary/25 bg-background px-1.5 py-1 text-[12px] leading-4 md:text-[12px]',
+                mobile ? 'min-h-11' : 'min-h-9',
+              )}
               value={layer.content.translation?.text ?? ''}
               onCommit={(text) =>
                 void call(commands.setTranslation, layer.id, text.trim() ? text : null)
@@ -934,6 +998,7 @@ function FontSizeField({
   onAutoFit: () => void
 }) {
   const { t } = useTranslation()
+  const mobile = useKoharuStore((state) => state.platform) === 'mobile'
   const id = useId()
   const [draft, setDraft] = useState<number | null>(value)
 
@@ -975,7 +1040,7 @@ function FontSizeField({
       onValueChange={setDraft}
       onValueCommitted={commit}
     >
-      <NumberFieldGroup>
+      <NumberFieldGroup className={cn(mobile && 'h-11')}>
         <NumberFieldInput
           data-testid='type-size'
           aria-label={t('inspector.fontSize')}
@@ -986,7 +1051,10 @@ function FontSizeField({
           <DropdownMenuTrigger
             disabled={disabled}
             aria-label={t('inspector.chooseFontSize')}
-            className='grid size-6 shrink-0 place-items-center border-l border-input text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground disabled:pointer-events-none disabled:opacity-40'
+            className={cn(
+              'grid shrink-0 place-items-center border-l border-input text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground disabled:pointer-events-none disabled:opacity-40',
+              mobile ? 'size-11' : 'size-6',
+            )}
           >
             <ChevronDown className='size-3' />
           </DropdownMenuTrigger>

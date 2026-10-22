@@ -5,6 +5,13 @@ mod vulkan;
 
 pub(crate) use hip::Target;
 
+/// Whether the opt-in battery-saver load profile is enabled in the runtime
+/// configuration. The local translation loader applies the reduced profile.
+#[must_use]
+pub fn battery_saver_enabled() -> bool {
+    android::battery_saver_enabled()
+}
+
 use std::{cmp::Reverse, sync::OnceLock};
 
 use crate::{Backend, Device, DeviceType};

@@ -6,9 +6,13 @@ icon: 'rocket'
 
 准备一张清晰的 PNG、JPEG 或 WebP 漫画图片，并先[安装 Koharu](/zh/installation)。
 
+<Note>
+  Android 上没有 `Documents/Koharu` 目录：项目保存在应用的私有存储中。请通过系统文件选择器导入页面，导出时用系统选择器选择目标文件夹。
+</Note>
+
 <Steps>
   <Step title="创建项目">
-    在开始界面的**新建项目**中输入名称，选择**创建**。Koharu 会在 `Documents/Koharu` 下创建自包含的 `.khrproj` 目录并打开编辑器。
+    在开始界面的**新建项目**中输入名称，选择**创建**。Koharu 会创建自包含的 `.khrproj` 目录（桌面端位于 `Documents/Koharu`，Android 端位于应用存储），并打开编辑器。
   </Step>
   <Step title="导入页面">
     选择**文件 → 导入页面 → 文件**，或使用空页面栏中显示的**导入**按钮。图片会复制到项目中，之后可以移动原文件。

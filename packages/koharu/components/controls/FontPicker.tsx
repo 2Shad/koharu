@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { useFontPreview } from '@/lib/queries'
+import { useKoharuStore } from '@/lib/store'
 import type { FontFamily, FontSource } from '@koharu/bridge/protocol'
 import { Badge } from '@koharu/ui/components/badge'
 import { Button } from '@koharu/ui/components/button'
@@ -65,6 +66,7 @@ export function FontPicker({
   onChange: (family: string) => void
 }) {
   const { t } = useTranslation()
+  const mobile = useKoharuStore((state) => state.platform) === 'mobile'
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [filters, setFilters] = useState<Filters>(emptyFilters)
@@ -132,6 +134,7 @@ export function FontPicker({
         className={cn(
           'w-full min-w-0 justify-between font-normal',
           size === 'sm' ? 'h-6 gap-1 px-1.5 text-[11px]' : 'h-8 gap-2 px-2.5 text-[12px]',
+          mobile && 'h-11',
         )}
       >
         {selectedFamily ? (
@@ -150,7 +153,12 @@ export function FontPicker({
         initialFocus={input}
       >
         <div className='border-b p-1'>
-          <InputGroup className='h-6 border-0 bg-muted/50 shadow-none focus-within:bg-background has-[>[data-align=inline-start]]:[&>input]:pl-0'>
+          <InputGroup
+            className={cn(
+              'border-0 bg-muted/50 shadow-none focus-within:bg-background has-[>[data-align=inline-start]]:[&>input]:pl-0',
+              mobile ? 'h-11' : 'h-6',
+            )}
+          >
             <InputGroupAddon className='pr-1 pl-1.5'>
               <Search className='size-3' />
             </InputGroupAddon>
@@ -159,7 +167,7 @@ export function FontPicker({
               value={query}
               aria-label={t('fontPicker.search')}
               placeholder={t('fontPicker.search')}
-              className='h-6 px-0 text-[11px]'
+              className={cn('px-0 text-[11px]', mobile ? 'h-11' : 'h-6')}
               onChange={(event) => setQuery(event.currentTarget.value)}
             />
             <InputGroupAddon align='inline-end' className='gap-0.5 pr-0.5'>
@@ -349,6 +357,8 @@ function FontList({
   onSelect: (family: string) => void
 }) {
   const { t } = useTranslation()
+  const mobile = useKoharuStore((state) => state.platform) === 'mobile'
+  const row = mobile ? 48 : rowHeight
   const list = useRef<HTMLDivElement>(null)
   const selectedIndex = families.findIndex(
     (family) => normalizeFontName(family.name) === normalizeFontName(value),
@@ -357,11 +367,11 @@ function FontList({
     count: families.length,
     getScrollElement: () => list.current,
     getItemKey: (index) => normalizeFontName(families[index]?.name ?? String(index)),
-    estimateSize: () => rowHeight,
+    estimateSize: () => row,
     overscan: 6,
     initialOffset: Math.max(
       0,
-      selectedIndex * rowHeight - Math.floor((listHeight / rowHeight - 1) / 2) * rowHeight,
+      selectedIndex * row - Math.floor((listHeight / row - 1) / 2) * row,
     ),
     initialRect: { width: 240, height: listHeight },
     observeElementRect: (instance, callback) =>
@@ -380,8 +390,8 @@ function FontList({
       style={{
         height:
           families.length === 0
-            ? rowHeight * 2
-            : Math.min(listHeight, Math.max(rowHeight, families.length * rowHeight)),
+            ? row * 2
+            : Math.min(listHeight, Math.max(row, families.length * row)),
       }}
     >
       <div className='relative' style={{ height: virtualizer.getTotalSize() }}>
@@ -402,7 +412,8 @@ function FontList({
               aria-label={t('fontPicker.fontLabel', { family: family.name, source })}
               aria-selected={selected}
               className={cn(
-                'absolute inset-x-0 top-0 flex h-9.5 w-full items-center px-2 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-none',
+                'absolute inset-x-0 top-0 flex w-full items-center px-2 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-none',
+                mobile ? 'h-12' : 'h-9.5',
                 selected && 'bg-accent text-accent-foreground',
               )}
               style={{ transform: `translateY(${virtualRow.start}px)` }}

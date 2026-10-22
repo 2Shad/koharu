@@ -254,6 +254,7 @@
     "github": "GitHub",
     "help": "Yardım",
     "import": "Sayfaları İçe Aktar",
+    "more": "Daha fazla",
     "process": "İşle",
     "processLayers": "Seçili Katmanları İşle",
     "processPages": "Seçili Sayfaları İşle",
@@ -262,6 +263,7 @@
     "runPhase": "{{phase}} çalıştır",
     "selectAllLayers": "Tüm Katmanları Seç",
     "settings": "Ayarlar",
+    "share": "Paylaş",
     "undo": "Geri Al",
     "view": "Görünüm"
   },
@@ -293,6 +295,7 @@
     "layerCount": "{{count}} katman",
     "layerCount_one": "{{count}} katman",
     "layerCount_other": "{{count}} katman",
+    "multiSelect": "Çoklu seçim",
     "noImage": "Görüntü yok",
     "noResults": "Bu filtreyle eşleşen sayfa yok.",
     "pageName": "Sayfa adı",
@@ -300,6 +303,7 @@
     "rename": "Yeniden adlandır",
     "renameDescription": "Bu sayfa için yeni bir ad seçin.",
     "renameTitle": "Sayfayı yeniden adlandır",
+    "reorder": "{{page}} sırasını değiştir",
     "selected": "{{count}} seçili"
   },
   "outputPicker": {

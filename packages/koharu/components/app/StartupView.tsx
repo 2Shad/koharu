@@ -17,7 +17,7 @@ export function StartupView() {
   }, [])
 
   return (
-    <div className='relative flex h-screen w-screen flex-col overflow-hidden bg-[var(--surface-titlebar)] pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] text-foreground'>
+    <div className='relative flex h-dvh w-dvw flex-col overflow-hidden bg-[var(--surface-titlebar)] pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] text-foreground'>
       {!mobile && (
         <header
           data-tauri-drag-region='deep'

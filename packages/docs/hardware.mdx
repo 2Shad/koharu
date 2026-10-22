@@ -72,6 +72,13 @@ android_vulkan = true
 
 Adreno Vulkan/OpenCL is frequently slower than CPU for small models and can be unstable. The mobile load profile derives the thread count from the performance-core topology and uses mmap with a Q8 KV cache.
 
+Local translation runs under a per-RAM-class load profile. Setting `battery_saver = true` in the same `[runtime]` section halves decode and prompt threads, shrinks the prompt batch, and trims the peak resident budget by 25%, trading throughput for a cooler, lower-power run. It is off by default; leave it off for the lowest single-page latency.
+
+```toml
+[runtime]
+battery_saver = true
+```
+
 ### Benchmarks
 
 Run the harness on the device to record a row:
@@ -81,6 +88,8 @@ cargo run -p koharu-translator --bin bench -- --model <model.gguf> --quantizatio
 ```
 
 Fill one row per reference device. Add `--json` for the raw record.
+
+The rows below are pending the reference-device runs: the translation column lists the intended profile for each RAM class, not a measured result. The [supported device matrix](/installation#supported-devices) covers the same three classes.
 
 | Device | SoC | RAM | Quant | Prompt tok/s | Generation tok/s | Page latency | Peak RSS | Thermal |
 | ------ | --- | --- | ----- | ------------ | ---------------- | ------------ | -------- | ------- |

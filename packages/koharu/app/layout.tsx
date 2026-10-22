@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import localFont from 'next/font/local'
 import { ThemeProvider } from 'next-themes'
 
@@ -13,6 +13,15 @@ const notoSansCJK = localFont({
 
 export const metadata: Metadata = {
   title: 'Koharu',
+}
+
+// Touch layout: full-bleed past the notch and resize the layout viewport when the soft
+// keyboard opens so text fields inside the mobile sheets stay visible.
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  interactiveWidget: 'resizes-content',
 }
 
 function RootLayout({

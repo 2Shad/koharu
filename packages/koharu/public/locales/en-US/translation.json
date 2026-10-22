@@ -254,6 +254,7 @@
     "github": "GitHub",
     "help": "Help",
     "import": "Import Pages",
+    "more": "More",
     "process": "Process",
     "processLayers": "Process Selected Layers",
     "processPages": "Process Selected Pages",
@@ -262,6 +263,7 @@
     "runPhase": "Run {{phase}}",
     "selectAllLayers": "Select All Layers",
     "settings": "Settings",
+    "share": "Share",
     "undo": "Undo",
     "view": "View"
   },
@@ -293,6 +295,7 @@
     "layerCount": "{{count}} layers",
     "layerCount_one": "{{count}} layer",
     "layerCount_other": "{{count}} layers",
+    "multiSelect": "Multi-select",
     "noImage": "No image",
     "noResults": "No pages match this filter.",
     "pageName": "Page name",
@@ -300,6 +303,7 @@
     "rename": "Rename",
     "renameDescription": "Choose a new name for this page.",
     "renameTitle": "Rename page",
+    "reorder": "Reorder {{page}}",
     "selected": "{{count}} selected"
   },
   "outputPicker": {

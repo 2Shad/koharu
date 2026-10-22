@@ -10,6 +10,7 @@ import {
   type Camera,
   type ResizeHandle,
 } from '@/lib/geometry'
+import { useKoharuStore } from '@/lib/store'
 import type { EntityId, Frame, Point, TransformFrame } from '@koharu/bridge/protocol'
 
 interface SelectionControlsProps {
@@ -55,6 +56,9 @@ export function SelectionControls({
 }: SelectionControlsProps) {
   const gesture = useRef<ControlGesture | null>(null)
   const position = cssFrame(frame, camera)
+  // Touch keeps the visible knobs small but gives each handle a 44px hit box. The box stays
+  // centred on the same point, so the visible handle does not move or grow.
+  const mobile = useKoharuStore((state) => state.platform === 'mobile')
 
   const eventPoint = (event: ReactPointerEvent<HTMLDivElement>): Point | null => {
     const bounds = container.current?.getBoundingClientRect()
@@ -146,17 +150,23 @@ export function SelectionControls({
           key={handle}
           data-canvas-control
           data-resize-handle={handle}
-          className='pointer-events-auto absolute grid size-3.5 -translate-x-1/2 -translate-y-1/2 touch-none place-items-center'
+          className={
+            mobile
+              ? 'pointer-events-auto absolute grid size-11 -translate-x-1/2 -translate-y-1/2 touch-none place-items-center'
+              : 'pointer-events-auto absolute grid size-3.5 -translate-x-1/2 -translate-y-1/2 touch-none place-items-center'
+          }
           style={{
             left,
             top,
             cursor,
+            // Touch boxes are 44px and overlap on small frames; corners win over edges.
+            zIndex: mobile ? (handle.length === 2 ? 2 : 1) : undefined,
             width:
-              edgesOnly && (handle === 'n' || handle === 's')
+              !mobile && edgesOnly && (handle === 'n' || handle === 's')
                 ? 'max(14px, calc(100% - 14px))'
                 : undefined,
             height:
-              edgesOnly && (handle === 'e' || handle === 'w')
+              !mobile && edgesOnly && (handle === 'e' || handle === 'w')
                 ? 'max(14px, calc(100% - 14px))'
                 : undefined,
           }}
@@ -169,11 +179,21 @@ export function SelectionControls({
         </div>
       ))}
 
-      <span className='pointer-events-none absolute top-0 left-1/2 h-2 w-px -translate-x-1/2 -translate-y-full bg-[var(--canvas-selection)]' />
+      <span
+        className={
+          mobile
+            ? 'pointer-events-none absolute top-0 left-1/2 h-12 w-px -translate-x-1/2 -translate-y-full bg-[var(--canvas-selection)]'
+            : 'pointer-events-none absolute top-0 left-1/2 h-2 w-px -translate-x-1/2 -translate-y-full bg-[var(--canvas-selection)]'
+        }
+      />
       <div
         data-canvas-control
         data-rotate-handle
-        className='pointer-events-auto absolute top-[-16px] left-1/2 grid size-3.5 -translate-x-1/2 -translate-y-1/2 cursor-alias touch-none place-items-center'
+        className={
+          mobile
+            ? 'pointer-events-auto absolute top-[-48px] left-1/2 grid size-11 -translate-x-1/2 -translate-y-1/2 cursor-alias touch-none place-items-center'
+            : 'pointer-events-auto absolute top-[-16px] left-1/2 grid size-3.5 -translate-x-1/2 -translate-y-1/2 cursor-alias touch-none place-items-center'
+        }
         onPointerDown={startRotate}
         {...pointerEvents}
       >
