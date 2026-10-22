@@ -85,6 +85,39 @@ async fn stop_after_a_page_keeps_completed_progress() {
     assert_eq!(report.total, 2);
 }
 
+#[tokio::test]
+async fn a_stage_without_its_runtime_fails_instead_of_hanging() {
+    let pipeline = pipeline(Default::default());
+    let mut session = koharu_scene::Session::memory().await.unwrap();
+    let patch = session
+        .snapshot()
+        .patch(|edit| {
+            edit.add_page(
+                koharu_scene::PageDraft::new("one", 1.0, 1.0),
+                koharu_scene::At::End,
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    session.commit(patch).await.unwrap();
+
+    let request = Request {
+        operation: Operation::Only {
+            stage: Stage::Detection,
+        },
+        ..Request::default()
+    };
+    let mut committer = RejectCommitter;
+
+    let error = pipeline
+        .execute(session.snapshot(), request, &mut committer)
+        .await
+        .expect_err("a stage whose runtime is unavailable must fail, not hang");
+    // This test process never calls `koharu_ml::init`, so no native runtime is
+    // reported as activated and the detection load is guarded.
+    assert!(format!("{error:#}").contains("Torch"), "{error:#}");
+}
+
 struct RejectCommitter;
 
 fn pipeline(translation: TranslationConfig) -> Pipeline {

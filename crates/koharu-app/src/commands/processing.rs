@@ -1,6 +1,7 @@
 use std::{collections::HashMap, fmt, sync::Arc};
 
 use anyhow::{Context as _, Result};
+use futures::FutureExt as _;
 use koharu_pipeline::{Committer, Progress, RunStatus, StageOutput, StopToken};
 use koharu_scene::Snapshot;
 use parking_lot::Mutex;
@@ -208,12 +209,23 @@ pub(crate) async fn process(
         let mut committer = PipelineCommitter {
             handle: task_handle.clone(),
         };
-        let result = pipeline.execute(snapshot, request, &mut committer).await;
+        // A stage can panic rather than return an error (for example the lazy
+        // `-sys` loader when a bundled runtime is missing). Catch it so the job
+        // still reaches a terminal state and its stop token is released.
+        let result =
+            std::panic::AssertUnwindSafe(pipeline.execute(snapshot, request, &mut committer))
+                .catch_unwind()
+                .await;
         let (stopped, error) = match result {
-            Ok(report) => (report.status == RunStatus::Stopped, None),
-            Err(error) => {
+            Ok(Ok(report)) => (report.status == RunStatus::Stopped, None),
+            Ok(Err(error)) => {
                 tracing::error!(stage = ?error.stage, %error, "processing failed");
                 (false, Some(format!("{error:#}")))
+            }
+            Err(payload) => {
+                let message = panic_message(payload);
+                tracing::error!(%message, "processing task panicked");
+                (false, Some(message))
             }
         };
         task_handle.state::<Processing>().stops.lock().remove(&id);
@@ -238,6 +250,18 @@ pub(crate) async fn process(
         }
     }));
     Ok(id)
+}
+
+/// Extracts a readable message from a caught panic payload so a failed job
+/// reports the cause instead of the spawned task vanishing silently.
+fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        (*message).to_owned()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "the processing task panicked".to_owned()
+    }
 }
 
 #[tauri::command]

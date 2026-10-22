@@ -141,6 +141,17 @@ fn generation(producer: &str, model: &str) -> Result<Generation> {
     Ok(generation)
 }
 
+/// Fails a stage load when the native runtime its configured model needs did not
+/// activate, so the caller gets a readable error instead of the lazy `-sys`
+/// loader panicking inside the first FFI call.
+fn require_runtime(model: &str, feature: koharu_ml::Feature) -> Result<()> {
+    anyhow::ensure!(
+        koharu_ml::features().contains(&feature),
+        "{model} needs the {feature:?} runtime, which is not available on this device"
+    );
+    Ok(())
+}
+
 fn finish(edit: Edit) -> Result<Patch> {
     edit.finish().map_err(Into::into)
 }
