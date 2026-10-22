@@ -24,7 +24,7 @@ use koharu_scene::{
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use super::{StageInput, StageProcessor, finish, generation};
+use super::{StageInput, StageProcessor, finish, generation, require_runtime};
 use crate::{InpaintingModel, ModelCell};
 
 const PRODUCER: &str = "dev.koharu.pipeline.inpainting";
@@ -125,6 +125,15 @@ impl StageProcessor for Processor {
     }
 
     async fn load(&self) -> Result<()> {
+        let feature = match self.config {
+            InpaintingModel::LaMa {} | InpaintingModel::AotInpainting {} => {
+                koharu_ml::Feature::Torch
+            }
+            InpaintingModel::Flux2Klein(_) | InpaintingModel::RoremMixed(_) => {
+                koharu_ml::Feature::Diffusion
+            }
+        };
+        require_runtime(self.model(), feature)?;
         self.model
             .ensure(|| Model::load(self.device.clone(), &self.config))
             .await

@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use super::{StageInput, StageProcessor, finish, generation};
+use super::{StageInput, StageProcessor, finish, generation, require_runtime};
 use crate::{ModelCell, OcrModel, scope::geometry_extents};
 use anyhow::{Context as _, Result, anyhow, bail};
 use async_trait::async_trait;
@@ -48,6 +48,13 @@ impl StageProcessor for Processor {
     }
 
     async fn load(&self) -> Result<()> {
+        let feature = match self.config {
+            OcrModel::MangaOcr | OcrModel::BaberuOcr | OcrModel::HayaiOcr => {
+                koharu_ml::Feature::Torch
+            }
+            OcrModel::PaddleOcrVl1_6 => koharu_ml::Feature::Llama,
+        };
+        require_runtime(self.model(), feature)?;
         self.model
             .ensure(|| Model::load(self.device.clone(), &self.config))
             .await

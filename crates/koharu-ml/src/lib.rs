@@ -1,6 +1,6 @@
 use anyhow::Context;
 use koharu_llama::llama_backend::LlamaBackend;
-use koharu_runtime::{Feature, Hardware, Runtime};
+use koharu_runtime::{Hardware, Runtime};
 use tokio::sync::OnceCell;
 
 mod backend;
@@ -29,12 +29,13 @@ pub mod speech_bubble_yolov8m;
 
 pub use koharu_diffusion as diffusion;
 pub use koharu_llama as llama;
-pub use koharu_runtime::{Backend, Device, DeviceType};
+pub use koharu_runtime::{Backend, Device, DeviceType, Feature};
 pub use koharu_torch as torch;
 
 static LLAMA: OnceCell<LlamaBackend> = OnceCell::const_new();
 static DIFFUSION: OnceCell<()> = OnceCell::const_new();
 static READY: OnceCell<Device> = OnceCell::const_new();
+static FEATURES: OnceCell<Vec<Feature>> = OnceCell::const_new();
 
 /// Initializes every process-wide native runtime used by Koharu.
 ///
@@ -57,6 +58,7 @@ pub async fn init() -> anyhow::Result<()> {
             // lands), so the backend for a feature that did not resolve or
             // activate must not be initialized.
             let features = runtime.features();
+            let _ = FEATURES.set(features.clone());
 
             if features.contains(&Feature::Llama) {
                 LLAMA
@@ -100,6 +102,17 @@ pub fn device(cpu: bool) -> Device {
 #[must_use]
 pub fn llama_backend() -> Option<&'static LlamaBackend> {
     LLAMA.get()
+}
+
+/// Returns the native runtime features that activated during [`init`].
+///
+/// Empty before [`init`] runs, or when no managed runtime package could load
+/// (for example an Android build without the bundled `.so` files). A consumer
+/// uses this to report a missing runtime as an error instead of calling into a
+/// lazy `-sys` loader that would panic on the first missing symbol.
+#[must_use]
+pub fn features() -> Vec<Feature> {
+    FEATURES.get().cloned().unwrap_or_default()
 }
 
 macro_rules! model_repository {

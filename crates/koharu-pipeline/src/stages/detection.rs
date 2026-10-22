@@ -36,7 +36,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use super::{StageInput, StageProcessor, finish, generation};
+use super::{StageInput, StageProcessor, finish, generation, require_runtime};
 use crate::{DetectionModel, ModelCell};
 
 const RFDETR_MODEL_ID: &str = "mayocream/koharu-layout-rfdetr-seg-2xl-1152";
@@ -191,6 +191,7 @@ impl StageProcessor for Processor {
     }
 
     async fn load(&self) -> Result<()> {
+        require_runtime(self.model(), koharu_ml::Feature::Torch)?;
         self.model
             .ensure(|| Model::load(self.device.clone(), &self.config))
             .await

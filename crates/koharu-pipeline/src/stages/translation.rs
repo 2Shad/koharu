@@ -5,7 +5,7 @@ use koharu_translator::{TranslationRequest, Translator};
 
 use crate::TranslationConfig;
 
-use super::{StageInput, StageProcessor, finish, generation};
+use super::{StageInput, StageProcessor, finish, generation, require_runtime};
 
 const PRODUCER: &str = "dev.koharu.pipeline.translation";
 
@@ -31,6 +31,11 @@ impl StageProcessor for Processor {
     }
 
     async fn load(&self) -> Result<()> {
+        // A local provider runs on llama.cpp; a remote provider needs no native
+        // runtime, so only guard the local path.
+        if self.config.model.provider == koharu_translator::Provider::Local {
+            require_runtime(self.model(), koharu_ml::Feature::Llama)?;
+        }
         self.translator.load_model(&self.config.model).await
     }
 
