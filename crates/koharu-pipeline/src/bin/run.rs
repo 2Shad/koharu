@@ -10,9 +10,10 @@ use anyhow::{Context as _, Result};
 use clap::{Parser, ValueEnum};
 use koharu_config::Config;
 use koharu_pipeline::{
-    Committer, DetectionModel, Flux2KleinConfig, InpaintingModel, KoharuLayoutRFDetrSeg2XLConfig,
-    OcrModel, Operation, Pipeline, PipelineConfig, Progress, Request, RoremMixedConfig, Scope,
-    StageOutput, TranslationConfig,
+    ComicLayoutYolo26sConfig, Committer, DetectionModel, Flux2KleinConfig, InpaintingModel,
+    KoharuLayoutRFDetrSeg2XLConfig, OcrModel, Operation, Pipeline, PipelineConfig,
+    PpDocLayoutV3Config, Progress, Request, RoremMixedConfig, Scope, StageOutput,
+    TranslationConfig,
 };
 use koharu_rasterizer::{RasterOptions, Rasterizer};
 use koharu_renderer::Renderer;
@@ -63,6 +64,10 @@ impl Committer for SessionCommitter<'_> {
 enum DetectionChoice {
     #[value(name = "koharu-layout-rfdetr-seg-2xl")]
     KoharuLayoutRFDetrSeg2XL,
+    #[value(name = "pp-doclayout-v3")]
+    PpDocLayoutV3,
+    #[value(name = "comic-layout-yolo26s")]
+    ComicLayoutYolo26s,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -97,6 +102,12 @@ impl Arguments {
                     DetectionModel::KoharuLayoutRFDetrSeg2XL(
                         KoharuLayoutRFDetrSeg2XLConfig::default(),
                     )
+                }
+                DetectionChoice::PpDocLayoutV3 => {
+                    DetectionModel::PpDocLayoutV3(PpDocLayoutV3Config::default())
+                }
+                DetectionChoice::ComicLayoutYolo26s => {
+                    DetectionModel::ComicLayoutYolo26s(ComicLayoutYolo26sConfig::default())
                 }
             },
             ocr: match self.ocr {

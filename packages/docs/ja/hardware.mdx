@@ -42,7 +42,11 @@ Koharu は使用する機能に必要なネイティブライブラリとモデ�
 
 ## Android
 
-Android 版は検出、OCR、翻訳、インペイントをすべて端末上で実行する設計で、初回リリースはオフラインで動作します。現在のマイルストーンで端末上で動くのは同梱の llama.cpp ランタイムによる翻訳で、検出、OCR、インペイントはこれから対応します。実行可能コードをダウンロードすることはありません。llama.cpp ランタイム（`libllama`、`libmtmd`）は APK に同梱され、アプリのネイティブライブラリディレクトリから読み込まれます。モデルの重みはデータとして通常どおり取得します。
+Android 版は検出、OCR、翻訳、インペイントをすべて端末上で実行し、初回リリースはオフラインで動作します。実行可能コードをダウンロードすることはありません。llama.cpp ランタイム（`libllama`、`libmtmd`）と LibTorch ランタイム（`libtorch_cpu`、`libkoharu-torch` とその依存ライブラリ）は APK に同梱され、アプリのネイティブライブラリディレクトリから読み込まれます。モデルの重みはデータとして通常どおり取得します。
+
+### モバイル既定値
+
+モバイルのパイプラインは同時に 1 つのステージだけを常駐させます。ステージの読み込み前に他のステージを破棄するため、ピークメモリは合計ではなく最大の単一モデルに収まります。既定値はコミック向けです。検出は Comic Layout YOLO26s（`balloon`/`text`/`frame` が吹き出し/テキスト/パネルに対応）、OCR は Manga OCR、インペイントは AOT です。1152px の RF-DETR Seg 2XL と LaMa も選択でき、PP-DocLayout-V3 は文書レイアウト向けに用意されています（テキスト領域のみコミックの契約に対応）。
 
 ### モバイル向けモデルプロファイル
 
@@ -81,6 +85,16 @@ cargo run -p koharu-translator --bin bench -- --model <model.gguf> --quantizatio
 | 12 GB ハイエンド |  | 12 GB | Q4_K_XL |  |  |  |  |  |
 | 6 GB 下限 |  | 6 GB | Q2_K_XL |  |  |  |  |  |
 
+### パリティ検証
+
+同じページで端末上の出力がデスクトップと一致するか確認します。
+
+```sh
+cargo run -p koharu-pipeline --bin parity -- --input <page-directory> --output android.json
+```
+
+デスクトップと端末でそれぞれ実行し、2 つの JSON（検出ボックス、マスクのダイジェスト、OCR テキスト、翻訳）を比較します。
+
 ## 取得されるデータ
 
 | データ                                                | 必要になるタイミング               |
@@ -89,7 +103,7 @@ cargo run -p koharu-translator --bin bench -- --model <model.gguf> --quantizatio
 | バージョンを固定したモデルの重み                      | 選択した処理モデルの初回使用時     |
 | ローカル GGUF 量子化ファイル                          | そのファイルを選択して使用するとき |
 
-パッケージは macOS と Linux では OS キャッシュ内の `koharu/packages`、Windows では Koharu のインストールディレクトリ内の `store` ディレクトリに保存されます。プロジェクトは `Documents/Koharu`、設定は `~/.koharu/config.toml` に保存されます。[データの保存先](/ja/reference/data)も参照してください。
+Android では Torch と llama.cpp のランタイムパッケージはダウンロードされず APK に同梱され、取得するのはモデルの重みだけです。パッケージは macOS と Linux では OS キャッシュ内の `koharu/packages`、Windows では Koharu のインストールディレクトリ内の `store` ディレクトリに保存されます。プロジェクトは `Documents/Koharu`、設定は `~/.koharu/config.toml` に保存されます。[データの保存先](/ja/reference/data)も参照してください。
 
 ダウンロードは一時領域で準備してからキャッシュへ公開します。中断した場合は次の起動やモデル使用時に再試行できます。
 

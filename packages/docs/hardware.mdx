@@ -45,7 +45,11 @@ Startup chooses a shared ML device from the available backends: Metal on Apple s
 
 ## Android
 
-The Android build is designed to run detection, OCR, translation, and inpainting fully on-device, so the first release works offline. The current milestone covers translation through the bundled llama.cpp runtime; detection, OCR, and inpainting are still landing. Android never downloads executable code: the llama.cpp runtime (`libllama`, `libmtmd`) is bundled in the APK and resolved from the app's native library directory. Model weights are data and download as usual.
+The Android build runs detection, OCR, translation, and inpainting fully on-device, so the first release works offline. Android never downloads executable code: the llama.cpp runtime (`libllama`, `libmtmd`) and the LibTorch runtime (`libtorch_cpu`, `libkoharu-torch`, and its dependencies) are bundled in the APK and resolved from the app's native library directory. Model weights are data and download as usual.
+
+### Mobile defaults
+
+The mobile pipeline keeps one model stage resident at a time: before a stage loads, every other stage is evicted, so peak memory tracks the largest single model instead of the sum. Defaults favor the comic profile — detection is Comic Layout YOLO26s (its `balloon`/`text`/`frame` classes map onto the bubble/text/panel contract), OCR is Manga OCR, and inpainting is AOT. The 1152px RF-DETR Seg 2XL detector and LaMa stay selectable; PP-DocLayout-V3 is available for document-style pages, where only its text regions map onto the comic contract.
 
 ### Mobile model profiles
 
@@ -84,6 +88,16 @@ Fill one row per reference device. Add `--json` for the raw record.
 | 12 GB flagship |  | 12 GB | Q4_K_XL |  |  |  |  |  |
 | 6 GB floor |  | 6 GB | Q2_K_XL |  |  |  |  |  |
 
+### Parity harness
+
+Verify that on-device output matches desktop over the same pages:
+
+```sh
+cargo run -p koharu-pipeline --bin parity -- --input <page-directory> --output android.json
+```
+
+Run it once on desktop and once on the device, then diff the two JSON reports (detection boxes, mask digests, OCR text, translations).
+
 ## Downloads and caches
 
 | Data                                                      | When it is needed                       |
@@ -92,7 +106,7 @@ Fill one row per reference device. Add `--json` for the raw record.
 | Pinned or versioned model weights                         | On first use of the selected processor  |
 | Local GGUF quantizations                                  | When you choose and use that model file |
 
-On macOS and Linux, packages live under the operating system cache directory in `koharu/packages`. On Windows, they live in the `store` directory inside Koharu's installation directory. Projects live under `Documents/Koharu`; settings live in `~/.koharu/config.toml`. See [data locations](/reference/data).
+On Android, the Torch and llama.cpp runtime packages are bundled in the APK rather than downloaded; only model weights are fetched. On macOS and Linux, packages live under the operating system cache directory in `koharu/packages`. On Windows, they live in the `store` directory inside Koharu's installation directory. Projects live under `Documents/Koharu`; settings live in `~/.koharu/config.toml`. See [data locations](/reference/data).
 
 Downloads are staged before being published to the cache. Retry an interrupted download on the next launch or model use.
 

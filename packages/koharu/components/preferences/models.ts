@@ -11,13 +11,15 @@ export type ModelStage = Exclude<Stage, 'translation'>
 export type ModelName = PipelineModel['model']
 
 export const modelOptions = {
-  detection: ['koharu-layout-rfdetr-seg-2xl'],
+  detection: ['koharu-layout-rfdetr-seg-2xl', 'comic-layout-yolo26s', 'pp-doclayout-v3'],
   ocr: ['paddleocr-vl-1.6', 'manga-ocr', 'baberu-ocr', 'hayai-ocr'],
   inpainting: ['lama', 'aot-inpainting', 'flux2-klein', 'rorem-mixed'],
 } satisfies Record<ModelStage, ModelName[]>
 
 export const modelNames: Record<ModelName, string> = {
   'koharu-layout-rfdetr-seg-2xl': 'Koharu Layout RF-DETR Seg 2XL',
+  'comic-layout-yolo26s': 'Comic Layout YOLO26s',
+  'pp-doclayout-v3': 'PP-DocLayout-V3',
   'paddleocr-vl-1.6': 'PaddleOCR-VL 1.6',
   'manga-ocr': 'Manga OCR',
   'baberu-ocr': 'Baberu OCR',
@@ -32,6 +34,9 @@ export function defaultModel(model: ModelName): PipelineModel {
   switch (model) {
     case 'koharu-layout-rfdetr-seg-2xl':
       return { model, text_threshold: null, bubble_threshold: null, panel_threshold: null }
+    case 'comic-layout-yolo26s':
+    case 'pp-doclayout-v3':
+      return { model, threshold: null }
     case 'paddleocr-vl-1.6':
     case 'manga-ocr':
     case 'baberu-ocr':
@@ -68,14 +73,21 @@ export function replaceStage(
         detection: model as DetectionModel,
         processor: {
           ...config.processor,
-          'koharu-layout-rfdetr-seg-2xl':
-            model.model === 'koharu-layout-rfdetr-seg-2xl'
-              ? {
+          ...(model.model === 'koharu-layout-rfdetr-seg-2xl'
+            ? {
+                'koharu-layout-rfdetr-seg-2xl': {
                   text_threshold: model.text_threshold ?? null,
                   bubble_threshold: model.bubble_threshold ?? null,
                   panel_threshold: model.panel_threshold ?? null,
-                }
-              : (config.processor?.['koharu-layout-rfdetr-seg-2xl'] ?? null),
+                },
+              }
+            : {}),
+          ...(model.model === 'comic-layout-yolo26s'
+            ? { 'comic-layout-yolo26s': { threshold: model.threshold ?? null } }
+            : {}),
+          ...(model.model === 'pp-doclayout-v3'
+            ? { 'pp-doclayout-v3': { threshold: model.threshold ?? null } }
+            : {}),
         },
       }
     case 'ocr':

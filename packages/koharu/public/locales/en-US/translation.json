@@ -389,7 +389,8 @@
         "negativePrompt": "Negative prompt",
         "panelThreshold": "Panel threshold",
         "prompt": "Prompt",
-        "textThreshold": "Text threshold"
+        "textThreshold": "Text threshold",
+        "threshold": "Threshold"
       },
       "processing": "Processing",
       "stages": {

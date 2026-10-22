@@ -389,7 +389,8 @@
         "negativePrompt": "Negatif istem",
         "panelThreshold": "Panel eşiği",
         "prompt": "İstem",
-        "textThreshold": "Metin eşiği"
+        "textThreshold": "Metin eşiği",
+        "threshold": "Eşik"
       },
       "processing": "İşleniyor",
       "stages": {

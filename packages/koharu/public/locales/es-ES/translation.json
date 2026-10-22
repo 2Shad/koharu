@@ -389,7 +389,8 @@
         "negativePrompt": "Indicación negativa",
         "panelThreshold": "Umbral de viñeta",
         "prompt": "Indicación",
-        "textThreshold": "Umbral de texto"
+        "textThreshold": "Umbral de texto",
+        "threshold": "Umbral"
       },
       "processing": "Procesando",
       "stages": {

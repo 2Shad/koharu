@@ -42,6 +42,13 @@ pub enum Torch {
         )
     )]
     Rocm,
+    #[strum(
+        serialize = "android-cpu",
+        props(
+            android = "libc10.so,libtorch_global_deps.so,libtorch_cpu.so,libtorch.so,libkoharu-torch.so"
+        )
+    )]
+    AndroidCpu,
 }
 
 impl Torch {
@@ -52,6 +59,8 @@ impl Torch {
             "linux"
         } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
             "macos"
+        } else if cfg!(target_os = "android") {
+            "android"
         } else {
             anyhow::bail!("Torch does not support this target")
         };
@@ -86,6 +95,13 @@ impl sealed::Sealed for Torch {}
 
 impl Package for Torch {
     async fn install(self) -> Result<PathBuf> {
+        // Android bundles libc10/libtorch in the APK's jniLibs and resolves the
+        // bare soname through the app's native library directory, so there is no
+        // download target; `<empty>.join("libc10.so")` yields the bare soname.
+        if matches!(self, Self::AndroidCpu) {
+            return Ok(PathBuf::new());
+        }
+
         let path = Store::root()
             .join("torch")
             .join(RELEASE)
@@ -114,6 +130,9 @@ impl Package for Torch {
 
 impl DiscoverablePackage for Torch {
     fn discover(hardware: &Hardware) -> Option<Self> {
+        if cfg!(target_os = "android") {
+            return Some(Self::AndroidCpu);
+        }
         if hardware.supports_metal() {
             return Some(Self::Cpu);
         }
@@ -143,6 +162,7 @@ impl RuntimePackage for Torch {
     fn dependencies(self, hardware: &Hardware) -> Result<Vec<Component>> {
         match self {
             Self::Cpu => Ok(Vec::new()),
+            Self::AndroidCpu => Ok(Vec::new()),
             Self::Rocm => Ok(vec![Component::Rocm(hardware.rocm_target()?)]),
             Self::Cuda => {
                 let packages = [

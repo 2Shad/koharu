@@ -8,7 +8,7 @@ use koharu_scene::{EntityId, Patch};
 
 use crate::{
     ErrorKind, PipelineConfig, PipelineError, Progress, ProgressSink, Stage, StopToken,
-    accelerator::AcceleratorGate,
+    accelerator::{AcceleratorGate, MemoryPolicy},
     progress,
     resources::ResourceMonitor,
     stages::{StageInput, Stages},
@@ -28,7 +28,7 @@ impl StageRunner {
     ) -> Result<Self> {
         Ok(Self {
             stages: Stages::new(config, translator, device)?,
-            accelerator: AcceleratorGate::new(device, resources),
+            accelerator: AcceleratorGate::new(device, resources, MemoryPolicy::for_platform()),
         })
     }
 
@@ -104,6 +104,11 @@ impl StageRunner {
                 model: model.to_owned(),
             },
         );
+        // The mobile policy holds one stage resident; the lane ensures no other
+        // stage is mid-inference when its weights are dropped.
+        if self.accelerator.evicts_between_stages() {
+            self.stages.unload_except(job.stage);
+        }
         self.stages
             .load(job.stage)
             .await

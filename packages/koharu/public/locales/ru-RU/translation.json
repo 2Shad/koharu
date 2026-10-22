@@ -389,7 +389,8 @@
         "negativePrompt": "Негативный промпт",
         "panelThreshold": "Порог панели",
         "prompt": "Промпт",
-        "textThreshold": "Порог текста"
+        "textThreshold": "Порог текста",
+        "threshold": "Порог"
       },
       "processing": "Обработка",
       "stages": {

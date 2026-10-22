@@ -17,9 +17,14 @@ use imageproc::{
     geometry::{approximate_polygon_dp, arc_length, contour_area},
     morphology::{close, dilate},
 };
-use koharu_ml::koharu_layout_rfdetr_seg_2xl::{
-    KoharuLayoutDetection, KoharuLayoutDetections, KoharuLayoutMask, KoharuLayoutRFDetrSeg2XL,
-    KoharuLayoutThresholds,
+use imageproc::{drawing::draw_polygon_mut, point::Point as ImagePoint};
+use koharu_ml::{
+    comic_layout_yolo26s::{ComicLayoutYolo26sInstances, ComicLayoutYolo26sSegmenter},
+    koharu_layout_rfdetr_seg_2xl::{
+        KoharuLayoutDetections as RfDetrDetections, KoharuLayoutMask as RfDetrMask,
+        KoharuLayoutRFDetrSeg2XL, KoharuLayoutThresholds,
+    },
+    pp_doclayout_v3::{PPDocLayoutV3, PPDocLayoutV3Detections},
 };
 use koharu_scene::{
     AssetInput, AssetMetadata, AssetRole, At, BubbleRegion, DetectionAnalysis, DetectionLabel,
@@ -34,8 +39,11 @@ use specta::Type;
 use super::{StageInput, StageProcessor, finish, generation};
 use crate::{DetectionModel, ModelCell};
 
-const MODEL_ID: &str = "mayocream/koharu-layout-rfdetr-seg-2xl-1152";
-const MODEL_NAME: &str = "koharu-layout-rfdetr-seg-2xl";
+const RFDETR_MODEL_ID: &str = "mayocream/koharu-layout-rfdetr-seg-2xl-1152";
+const PP_DOCLAYOUT_V3_MODEL_ID: &str = "PaddlePaddle/PP-DocLayoutV3_safetensors";
+const COMIC_LAYOUT_YOLO26S_MODEL_ID: &str = "mayocream/comic-layout-yolo26s";
+const PP_DOCLAYOUT_V3_THRESHOLD: f32 = 0.5;
+const COMIC_LAYOUT_YOLO26S_THRESHOLD: f32 = 0.25;
 const PRODUCER: &str = "dev.koharu.pipeline.detection";
 const ANGLE_SNAP_DEGREES: f32 = 3.0;
 const ANGLE_SEARCH_HALF_STEPS: i32 = 90;
@@ -57,6 +65,62 @@ pub struct KoharuLayoutRFDetrSeg2XLConfig {
     pub panel_threshold: Option<f32>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, Type)]
+#[serde(default)]
+pub struct PpDocLayoutV3Config {
+    pub threshold: Option<f32>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, Type)]
+#[serde(default)]
+pub struct ComicLayoutYolo26sConfig {
+    pub threshold: Option<f32>,
+}
+
+/// Pipeline-owned detection record. Every detector is normalized onto this shape
+/// so the scene-writing code below is independent of the model implementation.
+#[derive(Debug, Clone)]
+struct Detection {
+    label: String,
+    score: f32,
+    bbox: [f32; 4],
+    area: u32,
+    mask: DetectionMask,
+}
+
+#[derive(Debug, Clone)]
+struct DetectionMask {
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    pixels: Vec<u8>,
+}
+
+impl DetectionMask {
+    fn contains(&self, x: u32, y: u32) -> bool {
+        let Some(local_x) = x.checked_sub(self.x) else {
+            return false;
+        };
+        let Some(local_y) = y.checked_sub(self.y) else {
+            return false;
+        };
+        if local_x >= self.width || local_y >= self.height {
+            return false;
+        }
+        self.pixels
+            .get(local_y as usize * self.width as usize + local_x as usize)
+            .is_some_and(|value| *value != 0)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Detections {
+    image_width: u32,
+    image_height: u32,
+    detections: Vec<Detection>,
+}
+
 pub(super) struct Processor {
     config: DetectionModel,
     device: koharu_ml::Device,
@@ -65,23 +129,17 @@ pub(super) struct Processor {
 
 impl Processor {
     pub(super) fn new(mut config: DetectionModel, device: koharu_ml::Device) -> Self {
-        let DetectionModel::KoharuLayoutRFDetrSeg2XL(settings) = &mut config;
-        for (name, value) in [
-            ("text", &mut settings.text_threshold),
-            ("bubble", &mut settings.bubble_threshold),
-            ("panel", &mut settings.panel_threshold),
-        ] {
-            // A stored threshold is only a preference; refusing to start over one
-            // leaves the application unusable until the file is edited by hand.
-            if let Some(threshold) = *value
-                && !(threshold.is_finite() && (0.0..=1.0).contains(&threshold))
-            {
-                tracing::warn!(
-                    label = name,
-                    threshold = %threshold,
-                    "confidence threshold is not between zero and one; using the model default"
-                );
-                *value = None;
+        match &mut config {
+            DetectionModel::KoharuLayoutRFDetrSeg2XL(settings) => {
+                sanitize_threshold("text", &mut settings.text_threshold);
+                sanitize_threshold("bubble", &mut settings.bubble_threshold);
+                sanitize_threshold("panel", &mut settings.panel_threshold);
+            }
+            DetectionModel::PpDocLayoutV3(settings) => {
+                sanitize_threshold("threshold", &mut settings.threshold);
+            }
+            DetectionModel::ComicLayoutYolo26s(settings) => {
+                sanitize_threshold("threshold", &mut settings.threshold);
             }
         }
 
@@ -93,10 +151,25 @@ impl Processor {
     }
 }
 
+// A stored threshold is only a preference; refusing to start over one leaves the
+// application unusable until the file is edited by hand.
+fn sanitize_threshold(name: &str, value: &mut Option<f32>) {
+    if let Some(threshold) = *value
+        && !(threshold.is_finite() && (0.0..=1.0).contains(&threshold))
+    {
+        tracing::warn!(
+            label = name,
+            threshold = %threshold,
+            "confidence threshold is not between zero and one; using the model default"
+        );
+        *value = None;
+    }
+}
+
 #[async_trait]
 impl StageProcessor for Processor {
     fn model(&self) -> &'static str {
-        MODEL_NAME
+        self.config.name()
     }
 
     fn skip(&self, input: &StageInput) -> Result<bool> {
@@ -135,22 +208,56 @@ impl StageProcessor for Processor {
 }
 
 struct Model {
-    network: Arc<Mutex<KoharuLayoutRFDetrSeg2XL>>,
-    thresholds: KoharuLayoutThresholds,
+    detector: Detector,
+}
+
+enum Detector {
+    RfDetr {
+        network: Arc<Mutex<KoharuLayoutRFDetrSeg2XL>>,
+        thresholds: KoharuLayoutThresholds,
+    },
+    PpDocLayoutV3 {
+        network: Arc<Mutex<PPDocLayoutV3>>,
+        threshold: f32,
+    },
+    ComicLayoutYolo26s {
+        network: Arc<Mutex<ComicLayoutYolo26sSegmenter>>,
+        threshold: f32,
+    },
 }
 
 impl Model {
     async fn load(device: koharu_ml::Device, config: &DetectionModel) -> Result<Self> {
-        let DetectionModel::KoharuLayoutRFDetrSeg2XL(config) = config;
-        let network = KoharuLayoutRFDetrSeg2XL::load(device).await?;
-        let mut thresholds = network.recommended_thresholds();
-        thresholds.text = config.text_threshold.unwrap_or(thresholds.text);
-        thresholds.bubble = config.bubble_threshold.unwrap_or(thresholds.bubble);
-        thresholds.panel = config.panel_threshold.unwrap_or(thresholds.panel);
-        Ok(Self {
-            network: Arc::new(Mutex::new(network)),
-            thresholds,
-        })
+        let detector = match config {
+            DetectionModel::KoharuLayoutRFDetrSeg2XL(config) => {
+                let network = KoharuLayoutRFDetrSeg2XL::load(device).await?;
+                let mut thresholds = network.recommended_thresholds();
+                thresholds.text = config.text_threshold.unwrap_or(thresholds.text);
+                thresholds.bubble = config.bubble_threshold.unwrap_or(thresholds.bubble);
+                thresholds.panel = config.panel_threshold.unwrap_or(thresholds.panel);
+                Detector::RfDetr {
+                    network: Arc::new(Mutex::new(network)),
+                    thresholds,
+                }
+            }
+            DetectionModel::PpDocLayoutV3(config) => Detector::PpDocLayoutV3 {
+                network: Arc::new(Mutex::new(PPDocLayoutV3::load(device).await?)),
+                threshold: config.threshold.unwrap_or(PP_DOCLAYOUT_V3_THRESHOLD),
+            },
+            DetectionModel::ComicLayoutYolo26s(config) => Detector::ComicLayoutYolo26s {
+                network: Arc::new(Mutex::new(ComicLayoutYolo26sSegmenter::load(device).await?)),
+                threshold: config.threshold.unwrap_or(COMIC_LAYOUT_YOLO26S_THRESHOLD),
+            },
+        };
+        Ok(Self { detector })
+    }
+
+    fn model_id(&self) -> &'static str {
+        match self.detector {
+            Detector::RfDetr { .. } => RFDETR_MODEL_ID,
+            Detector::PpDocLayoutV3 { .. } => PP_DOCLAYOUT_V3_MODEL_ID,
+            Detector::ComicLayoutYolo26s { .. } => COMIC_LAYOUT_YOLO26S_MODEL_ID,
+        }
     }
 
     async fn run(&self, input: StageInput) -> Result<koharu_scene::Patch> {
@@ -161,31 +268,214 @@ impl Model {
             .await?
             .ok_or_else(|| anyhow!("page {page} has no source image"))?;
         let output = self.detect(image.clone()).await?;
-        build_patch(&input, &image, output, &generation(PRODUCER, MODEL_ID)?).await
+        build_patch(
+            &input,
+            &image,
+            output,
+            &generation(PRODUCER, self.model_id())?,
+        )
+        .await
     }
 
-    async fn detect(&self, image: Arc<DynamicImage>) -> Result<KoharuLayoutDetections> {
-        let network = self.network.clone();
-        let thresholds = self.thresholds;
-        tokio_rayon::spawn(move || {
-            let network = network
-                .lock()
-                .map_err(|_| anyhow!("layout model lock is poisoned"))?;
-            network.inference_with_thresholds(&image, thresholds)
-        })
-        .await
+    async fn detect(&self, image: Arc<DynamicImage>) -> Result<Detections> {
+        match &self.detector {
+            Detector::RfDetr {
+                network,
+                thresholds,
+            } => {
+                let network = network.clone();
+                let thresholds = *thresholds;
+                tokio_rayon::spawn(move || {
+                    let network = network
+                        .lock()
+                        .map_err(|_| anyhow!("layout model lock is poisoned"))?;
+                    network
+                        .inference_with_thresholds(&image, thresholds)
+                        .map(rfdetr_detections)
+                })
+                .await
+            }
+            Detector::PpDocLayoutV3 { network, threshold } => {
+                let network = network.clone();
+                let threshold = *threshold;
+                tokio_rayon::spawn(move || {
+                    let network = network
+                        .lock()
+                        .map_err(|_| anyhow!("layout model lock is poisoned"))?;
+                    network.inference(&image, threshold).map(|output| {
+                        pp_doclayout_v3_detections(output, image.width(), image.height())
+                    })
+                })
+                .await
+            }
+            Detector::ComicLayoutYolo26s { network, threshold } => {
+                let network = network.clone();
+                let threshold = *threshold;
+                tokio_rayon::spawn(move || {
+                    let network = network
+                        .lock()
+                        .map_err(|_| anyhow!("layout model lock is poisoned"))?;
+                    network
+                        .inference_with_threshold(&image, threshold)
+                        .map(comic_layout_yolo26s_detections)
+                })
+                .await
+            }
+        }
+    }
+}
+
+fn rfdetr_detections(output: RfDetrDetections) -> Detections {
+    Detections {
+        image_width: output.image_width,
+        image_height: output.image_height,
+        detections: output
+            .detections
+            .into_iter()
+            .map(|detection| Detection {
+                label: detection.label,
+                score: detection.score,
+                bbox: detection.bbox,
+                area: detection.area,
+                mask: detection_mask(detection.mask),
+            })
+            .collect(),
+    }
+}
+
+fn comic_layout_yolo26s_detections(output: ComicLayoutYolo26sInstances) -> Detections {
+    Detections {
+        image_width: output.image_width,
+        image_height: output.image_height,
+        detections: output
+            .instances
+            .into_iter()
+            .filter_map(|instance| {
+                let label = comic_layout_yolo26s_label(&instance.label)?;
+                Some(Detection {
+                    label: label.to_owned(),
+                    score: instance.score,
+                    bbox: instance.bbox,
+                    area: instance.area,
+                    mask: DetectionMask {
+                        x: instance.mask.x,
+                        y: instance.mask.y,
+                        width: instance.mask.width,
+                        height: instance.mask.height,
+                        pixels: instance.mask.pixels,
+                    },
+                })
+            })
+            .collect(),
+    }
+}
+
+/// YOLO26s is trained on comic pages, so its classes map directly onto the
+/// text/bubble/panel contract.
+fn comic_layout_yolo26s_label(label: &str) -> Option<&'static str> {
+    match label {
+        "text" => Some("text"),
+        "balloon" => Some("bubble"),
+        "frame" => Some("panel"),
+        _ => None,
+    }
+}
+
+fn pp_doclayout_v3_detections(
+    output: PPDocLayoutV3Detections,
+    width: u32,
+    height: u32,
+) -> Detections {
+    Detections {
+        image_width: width,
+        image_height: height,
+        detections: output
+            .regions
+            .into_iter()
+            .filter_map(|region| {
+                let label = pp_doclayout_v3_label(&region.label)?;
+                let [left, top, right, bottom] = region.bbox;
+                let x = left.floor().clamp(0.0, width as f32) as u32;
+                let y = top.floor().clamp(0.0, height as f32) as u32;
+                let right = right.ceil().clamp(0.0, width as f32) as u32;
+                let bottom = bottom.ceil().clamp(0.0, height as f32) as u32;
+                if right <= x || bottom <= y {
+                    return None;
+                }
+                let mask_width = right - x;
+                let mask_height = bottom - y;
+                let mut mask = GrayImage::new(mask_width, mask_height);
+                match region.polygon_points.as_deref() {
+                    Some(points) if points.len() >= 3 => {
+                        let points = points
+                            .iter()
+                            .map(|point| {
+                                ImagePoint::new(
+                                    (point[0] - left).round() as i32,
+                                    (point[1] - top).round() as i32,
+                                )
+                            })
+                            .collect::<Vec<_>>();
+                        draw_polygon_mut(&mut mask, &points, Luma([u8::MAX]));
+                    }
+                    _ => {
+                        for pixel in mask.pixels_mut() {
+                            *pixel = Luma([u8::MAX]);
+                        }
+                    }
+                }
+                let pixels = mask.into_raw();
+                let area = pixels.iter().filter(|value| **value != 0).count() as u32;
+                if area == 0 {
+                    return None;
+                }
+                Some(Detection {
+                    label: label.to_owned(),
+                    score: region.score,
+                    bbox: region.bbox,
+                    area,
+                    mask: DetectionMask {
+                        x,
+                        y,
+                        width: mask_width,
+                        height: mask_height,
+                        pixels,
+                    },
+                })
+            })
+            .collect(),
+    }
+}
+
+/// PP-DocLayout-V3 is a document layout model; only its text-bearing classes map
+/// onto the comic region contract. The rest are dropped rather than written as
+/// unknown regions.
+fn pp_doclayout_v3_label(label: &str) -> Option<&'static str> {
+    match label {
+        "text" | "content" => Some("text"),
+        _ => None,
+    }
+}
+
+fn detection_mask(mask: RfDetrMask) -> DetectionMask {
+    DetectionMask {
+        x: mask.x,
+        y: mask.y,
+        width: mask.width,
+        height: mask.height,
+        pixels: mask.pixels,
     }
 }
 
 struct DetectedRegion<'a> {
     entity: EntityId,
-    mask: &'a KoharuLayoutMask,
+    mask: &'a DetectionMask,
     area: u32,
 }
 
 struct DetectedText<'a> {
     entity: EntityId,
-    mask: &'a KoharuLayoutMask,
+    mask: &'a DetectionMask,
     bounds: [f32; 4],
     content: EntityId,
     layer: EntityId,
@@ -212,7 +502,7 @@ struct ImageSize {
 async fn build_patch(
     input: &StageInput,
     image: &DynamicImage,
-    output: KoharuLayoutDetections,
+    output: Detections,
     generation: &Generation,
 ) -> Result<koharu_scene::Patch> {
     let page = input.page;
@@ -260,10 +550,10 @@ async fn write_page(
     edit: &mut koharu_scene::Edit,
     page: EntityId,
     image: &DynamicImage,
-    output: KoharuLayoutDetections,
+    output: Detections,
     generation: &Generation,
 ) -> Result<()> {
-    let KoharuLayoutDetections {
+    let Detections {
         mut detections,
         image_width,
         image_height,
@@ -293,7 +583,7 @@ fn write_regions<'a>(
     edit: &mut koharu_scene::Edit,
     page: EntityId,
     image: &RgbImage,
-    detections: &'a [KoharuLayoutDetection],
+    detections: &'a [Detection],
     generation: &Generation,
 ) -> Result<PageRegions<'a>> {
     let mut regions = PageRegions::default();
@@ -335,7 +625,7 @@ fn write_regions<'a>(
 fn write_region<'a>(
     edit: &mut koharu_scene::Edit,
     page: EntityId,
-    detection: &'a KoharuLayoutDetection,
+    detection: &'a Detection,
     inferred: Option<InferredTypography>,
     generation: &Generation,
 ) -> Result<RegionOutput<'a>> {
@@ -508,10 +798,7 @@ struct MaskPixel {
 // projection-profile sharpness supplies the line axis. Whole-block PCA is
 // deliberately avoided because a tall multiline horizontal block otherwise
 // looks vertical.
-fn infer_typography(
-    image: &RgbImage,
-    detection: &KoharuLayoutDetection,
-) -> Option<InferredTypography> {
+fn infer_typography(image: &RgbImage, detection: &Detection) -> Option<InferredTypography> {
     let mask = &detection.mask;
     let width = image.width();
     let height = image.height();
@@ -1322,7 +1609,7 @@ fn rotated_rectangle_geometry(
     }
 }
 
-fn mask_geometry(mask: &KoharuLayoutMask) -> Option<Geometry> {
+fn mask_geometry(mask: &DetectionMask) -> Option<Geometry> {
     let origin = (mask.x, mask.y);
     let mask = GrayImage::from_raw(mask.width, mask.height, mask.pixels.clone())?;
     let mut padded = GrayImage::new(mask.width() + 2, mask.height() + 2);
@@ -1358,7 +1645,7 @@ async fn write_masks(
     input: &StageInput,
     edit: &mut koharu_scene::Edit,
     page: EntityId,
-    detections: &[KoharuLayoutDetection],
+    detections: &[Detection],
     size: ImageSize,
 ) -> Result<()> {
     write_mask(input, edit, page, detections, size).await?;
@@ -1370,7 +1657,7 @@ async fn write_mask(
     input: &StageInput,
     edit: &mut koharu_scene::Edit,
     page: EntityId,
-    detections: &[KoharuLayoutDetection],
+    detections: &[Detection],
     size: ImageSize,
 ) -> Result<()> {
     let mut mask = if size.width > 0 && size.height > 0 {
@@ -1450,7 +1737,7 @@ fn region_kind(label: &str) -> Result<RegionKind> {
     .map_err(Into::into)
 }
 
-fn mask_for(detections: &[KoharuLayoutDetection], label: &str, size: ImageSize) -> GrayImage {
+fn mask_for(detections: &[Detection], label: &str, size: ImageSize) -> GrayImage {
     let mut mask = GrayImage::new(size.width, size.height);
     for detection in detections.iter().filter(|value| value.label == label) {
         stamp_mask(&mut mask, &detection.mask, 0, 0);
@@ -1459,7 +1746,7 @@ fn mask_for(detections: &[KoharuLayoutDetection], label: &str, size: ImageSize) 
 }
 
 fn closed_mask_for(
-    detections: &[KoharuLayoutDetection],
+    detections: &[Detection],
     label: &str,
     size: ImageSize,
     radius: u8,
@@ -1529,14 +1816,14 @@ fn closed_mask_for(
     output
 }
 
-fn valid_mask(mask: &KoharuLayoutMask) -> bool {
+fn valid_mask(mask: &DetectionMask) -> bool {
     mask.width
         .checked_mul(mask.height)
         .and_then(|count| usize::try_from(count).ok())
         == Some(mask.pixels.len())
 }
 
-fn stamp_mask(target: &mut GrayImage, mask: &KoharuLayoutMask, origin_x: u32, origin_y: u32) {
+fn stamp_mask(target: &mut GrayImage, mask: &DetectionMask, origin_x: u32, origin_y: u32) {
     if !valid_mask(mask) {
         return;
     }
@@ -1565,7 +1852,7 @@ fn stamp_mask(target: &mut GrayImage, mask: &KoharuLayoutMask, origin_x: u32, or
     }
 }
 
-fn mask_bounds(mask: &KoharuLayoutMask, size: ImageSize) -> [u32; 4] {
+fn mask_bounds(mask: &DetectionMask, size: ImageSize) -> [u32; 4] {
     [
         mask.x.min(size.width),
         mask.y.min(size.height),
@@ -1574,7 +1861,7 @@ fn mask_bounds(mask: &KoharuLayoutMask, size: ImageSize) -> [u32; 4] {
     ]
 }
 
-fn expand_mask_bounds(mask: &KoharuLayoutMask, radius: u32, size: ImageSize) -> [u32; 4] {
+fn expand_mask_bounds(mask: &DetectionMask, radius: u32, size: ImageSize) -> [u32; 4] {
     expand_bounds(mask_bounds(mask, size), radius, size)
 }
 
@@ -1623,14 +1910,14 @@ fn intersects([left, top, right, bottom]: [f32; 4], region: crate::Bounds) -> bo
         && bottom > region.y as f32
 }
 
-fn detection_order(left: &KoharuLayoutDetection, right: &KoharuLayoutDetection) -> Ordering {
+fn detection_order(left: &Detection, right: &Detection) -> Ordering {
     left.bbox[1]
         .total_cmp(&right.bbox[1])
         .then_with(|| right.bbox[0].total_cmp(&left.bbox[0]))
         .then_with(|| left.label.cmp(&right.label))
 }
 
-fn non_maximum_suppression(detections: &mut Vec<KoharuLayoutDetection>, threshold: f32) {
+fn non_maximum_suppression(detections: &mut Vec<Detection>, threshold: f32) {
     detections.sort_by(|left, right| {
         right
             .score
@@ -1639,7 +1926,7 @@ fn non_maximum_suppression(detections: &mut Vec<KoharuLayoutDetection>, threshol
     });
     let mut kept = Vec::with_capacity(detections.len());
     for candidate in detections.drain(..) {
-        let suppressed = kept.iter().any(|existing: &KoharuLayoutDetection| {
+        let suppressed = kept.iter().any(|existing: &Detection| {
             existing.label == candidate.label
                 && intersection_over_union(existing.bbox, candidate.bbox) >= threshold
         });
@@ -1650,7 +1937,7 @@ fn non_maximum_suppression(detections: &mut Vec<KoharuLayoutDetection>, threshol
     *detections = kept;
 }
 
-fn sort_by_layout(detections: &mut Vec<KoharuLayoutDetection>) {
+fn sort_by_layout(detections: &mut Vec<Detection>) {
     let order = layout_order(detections);
     let mut values = std::mem::take(detections)
         .into_iter()
@@ -1666,7 +1953,7 @@ fn sort_by_layout(detections: &mut Vec<KoharuLayoutDetection>) {
         .collect();
 }
 
-fn layout_order(detections: &[KoharuLayoutDetection]) -> Vec<usize> {
+fn layout_order(detections: &[Detection]) -> Vec<usize> {
     let panels = indices_with_label(detections, "panel");
     let bubbles = indices_with_label(detections, "bubble");
     let texts = indices_with_label(detections, "text");
@@ -1714,7 +2001,7 @@ fn layout_order(detections: &[KoharuLayoutDetection]) -> Vec<usize> {
     order
 }
 
-fn indices_with_label(detections: &[KoharuLayoutDetection], label: &str) -> Vec<usize> {
+fn indices_with_label(detections: &[Detection], label: &str) -> Vec<usize> {
     detections
         .iter()
         .enumerate()
@@ -1729,7 +2016,7 @@ fn append_layout_subtree(index: usize, children: &[Vec<usize>], order: &mut Vec<
     }
 }
 
-fn sort_spatial(detections: &[KoharuLayoutDetection], indices: &mut [usize]) {
+fn sort_spatial(detections: &[Detection], indices: &mut [usize]) {
     indices.sort_by(|&left, &right| {
         detection_order(&detections[left], &detections[right])
             .then_with(|| detections[right].score.total_cmp(&detections[left].score))
@@ -1737,11 +2024,7 @@ fn sort_spatial(detections: &[KoharuLayoutDetection], indices: &mut [usize]) {
     });
 }
 
-fn best_container(
-    detections: &[KoharuLayoutDetection],
-    value: usize,
-    candidates: &[usize],
-) -> Option<usize> {
+fn best_container(detections: &[Detection], value: usize, candidates: &[usize]) -> Option<usize> {
     candidates
         .iter()
         .copied()
@@ -1762,11 +2045,7 @@ fn containment(container: [f32; 4], value: [f32; 4]) -> f32 {
     intersection_area(container, value) / value_area
 }
 
-fn mask_containment(
-    container: &KoharuLayoutMask,
-    value: &KoharuLayoutMask,
-    bounds: [f32; 4],
-) -> f32 {
+fn mask_containment(container: &DetectionMask, value: &DetectionMask, bounds: [f32; 4]) -> f32 {
     if !valid_mask(container) || !valid_mask(value) {
         return 0.0;
     }
@@ -1837,18 +2116,18 @@ mod tests {
         distance_transform::Norm,
         morphology::{close, dilate},
     };
-    use koharu_ml::koharu_layout_rfdetr_seg_2xl::{KoharuLayoutDetection, KoharuLayoutMask};
     use koharu_scene::{
         At, BubbleRegion, FitsTo, FlowsIn, Geometry, Inside, Origin, PageDraft, Session,
         TextLayout, TextLayoutKind, TextRegion, Typography, WritingMode,
     };
 
     use super::{
-        DIALOGUE_MASK_CONTAINMENT_THRESHOLD, DetectedRegion, DetectedText, DetectionModel,
-        ImageSize, KoharuLayoutRFDetrSeg2XLConfig, MaskPixel, PageRegions, Processor, RegionOutput,
-        StageInput, StageProcessor, closed_mask_for, color_palette, generation, infer_typography,
-        layout_order, link_dialogue_regions, mask_containment, mask_for, mask_geometry,
-        non_maximum_suppression, normalize_text_color, write_region,
+        DIALOGUE_MASK_CONTAINMENT_THRESHOLD, DetectedRegion, DetectedText, Detection,
+        DetectionMask, DetectionModel, ImageSize, KoharuLayoutRFDetrSeg2XLConfig, MaskPixel,
+        PageRegions, Processor, RegionOutput, StageInput, StageProcessor, closed_mask_for,
+        color_palette, generation, infer_typography, layout_order, link_dialogue_regions,
+        mask_containment, mask_for, mask_geometry, non_maximum_suppression, normalize_text_color,
+        write_region,
     };
 
     #[test]
@@ -1862,7 +2141,9 @@ mod tests {
             koharu_ml::Device::cpu(),
         );
 
-        let DetectionModel::KoharuLayoutRFDetrSeg2XL(settings) = &processor.config;
+        let DetectionModel::KoharuLayoutRFDetrSeg2XL(settings) = &processor.config else {
+            panic!("expected RF-DETR settings")
+        };
         assert_eq!(settings.text_threshold, None);
         assert_eq!(settings.bubble_threshold, None);
         assert_eq!(settings.panel_threshold, Some(0.55));
@@ -1907,7 +2188,7 @@ mod tests {
     #[tokio::test]
     async fn joined_text_uses_balloon_flow_semantics() {
         let mut session = Session::memory().await.unwrap();
-        let bubble_mask = KoharuLayoutMask {
+        let bubble_mask = DetectionMask {
             x: 0,
             y: 0,
             width: 1,
@@ -1915,7 +2196,7 @@ mod tests {
             pixels: vec![u8::MAX],
         };
         let text_mask = bubble_mask.clone();
-        let generation = generation(super::PRODUCER, super::MODEL_ID).unwrap();
+        let generation = generation(super::PRODUCER, super::RFDETR_MODEL_ID).unwrap();
         let mut ids = None;
         let patch = session
             .snapshot()
@@ -1991,14 +2272,13 @@ mod tests {
         );
     }
 
-    fn detection(label: &str, score: f32, bbox: [f32; 4]) -> KoharuLayoutDetection {
-        KoharuLayoutDetection {
-            label_id: 0,
+    fn detection(label: &str, score: f32, bbox: [f32; 4]) -> Detection {
+        Detection {
             label: label.to_owned(),
             score,
             bbox,
             area: 0,
-            mask: KoharuLayoutMask {
+            mask: DetectionMask {
                 x: 0,
                 y: 0,
                 width: 1,
@@ -2021,7 +2301,7 @@ mod tests {
             }
         }
 
-        let geometry = mask_geometry(&KoharuLayoutMask {
+        let geometry = mask_geometry(&DetectionMask {
             x: 10,
             y: 20,
             width: width as u32,
@@ -2050,7 +2330,7 @@ mod tests {
         local_height: f64,
         angle_degrees: f64,
         color: [u8; 3],
-    ) -> (RgbImage, KoharuLayoutDetection) {
+    ) -> (RgbImage, Detection) {
         let width = 96;
         let height = 96;
         let center_x = f64::from(width) * 0.5;
@@ -2072,13 +2352,12 @@ mod tests {
         }
         (
             image,
-            KoharuLayoutDetection {
-                label_id: 0,
+            Detection {
                 label: "text".to_owned(),
                 score: 1.0,
                 bbox: [0.0, 0.0, width as f32, height as f32],
                 area: pixels.iter().filter(|value| **value != 0).count() as u32,
-                mask: KoharuLayoutMask {
+                mask: DetectionMask {
                     x: 0,
                     y: 0,
                     width,
@@ -2089,11 +2368,7 @@ mod tests {
         )
     }
 
-    fn outlined_text(
-        stroke_width: u32,
-        fill: [u8; 3],
-        stroke: [u8; 3],
-    ) -> (RgbImage, KoharuLayoutDetection) {
+    fn outlined_text(stroke_width: u32, fill: [u8; 3], stroke: [u8; 3]) -> (RgbImage, Detection) {
         outlined_text_on_background(stroke_width, fill, stroke, [16, 24, 88])
     }
 
@@ -2102,7 +2377,7 @@ mod tests {
         fill: [u8; 3],
         stroke: [u8; 3],
         background: [u8; 3],
-    ) -> (RgbImage, KoharuLayoutDetection) {
+    ) -> (RgbImage, Detection) {
         let width = 96;
         let height = 96;
         let [left, top, right, bottom] = [20, 38, 76, 58];
@@ -2120,13 +2395,12 @@ mod tests {
         }
         (
             image,
-            KoharuLayoutDetection {
-                label_id: 0,
+            Detection {
                 label: "text".to_owned(),
                 score: 1.0,
                 bbox: [left as f32, top as f32, right as f32, bottom as f32],
                 area: pixels.iter().filter(|value| **value != 0).count() as u32,
-                mask: KoharuLayoutMask {
+                mask: DetectionMask {
                     x: 0,
                     y: 0,
                     width,
@@ -2137,7 +2411,7 @@ mod tests {
         )
     }
 
-    fn region_masked_text(fill: [u8; 3], background: [u8; 3]) -> (RgbImage, KoharuLayoutDetection) {
+    fn region_masked_text(fill: [u8; 3], background: [u8; 3]) -> (RgbImage, Detection) {
         let width = 96;
         let height = 96;
         let [left, top, right, bottom] = [20, 20, 76, 76];
@@ -2157,13 +2431,12 @@ mod tests {
         }
         (
             image,
-            KoharuLayoutDetection {
-                label_id: 0,
+            Detection {
                 label: "text".to_owned(),
                 score: 1.0,
                 bbox: [left as f32, top as f32, right as f32, bottom as f32],
                 area: pixels.iter().filter(|value| **value != 0).count() as u32,
-                mask: KoharuLayoutMask {
+                mask: DetectionMask {
                     x: 0,
                     y: 0,
                     width,
@@ -2174,7 +2447,7 @@ mod tests {
         )
     }
 
-    fn outlined_text_on_textured_background() -> (RgbImage, KoharuLayoutDetection) {
+    fn outlined_text_on_textured_background() -> (RgbImage, Detection) {
         let width = 96;
         let height = 96;
         let [left, top, right, bottom] = [20, 20, 76, 76];
@@ -2210,13 +2483,12 @@ mod tests {
         }
         (
             image,
-            KoharuLayoutDetection {
-                label_id: 0,
+            Detection {
                 label: "text".to_owned(),
                 score: 1.0,
                 bbox: [left as f32, top as f32, right as f32, bottom as f32],
                 area: pixels.iter().filter(|value| **value != 0).count() as u32,
-                mask: KoharuLayoutMask {
+                mask: DetectionMask {
                     x: 0,
                     y: 0,
                     width,
@@ -2242,7 +2514,7 @@ mod tests {
         let page = page.unwrap();
         let (image, detection) = outlined_text(3, [0, 0, 0], [255, 255, 255]);
         let inferred = infer_typography(&image, &detection);
-        let generation = generation(super::PRODUCER, super::MODEL_ID).unwrap();
+        let generation = generation(super::PRODUCER, super::RFDETR_MODEL_ID).unwrap();
         let mut layer = None;
         let patch = snapshot
             .patch(|edit| {
@@ -2292,13 +2564,12 @@ mod tests {
 
     #[test]
     fn text_mask_excludes_onomatopoeia() {
-        let detection = |label: &str, x: u32, value: u8| KoharuLayoutDetection {
-            label_id: 0,
+        let detection = |label: &str, x: u32, value: u8| Detection {
             label: label.to_owned(),
             score: 1.0,
             bbox: [x as f32, 0.0, x as f32 + 1.0, 1.0],
             area: u32::from(value != 0),
-            mask: KoharuLayoutMask {
+            mask: DetectionMask {
                 x,
                 y: 0,
                 width: 1,
@@ -2327,7 +2598,7 @@ mod tests {
 
     #[test]
     fn bubble_membership_uses_detected_ink_instead_of_text_box_corners() {
-        let mask = |pixels| KoharuLayoutMask {
+        let mask = |pixels| DetectionMask {
             x: 0,
             y: 0,
             width: 5,
@@ -2363,21 +2634,21 @@ mod tests {
 
     #[test]
     fn mask_containment_accepts_independent_local_extents() {
-        let valid = KoharuLayoutMask {
+        let valid = DetectionMask {
             x: 5,
             y: 5,
             width: 2,
             height: 2,
             pixels: vec![1; 4],
         };
-        let malformed = KoharuLayoutMask {
+        let malformed = DetectionMask {
             x: 5,
             y: 5,
             width: 2,
             height: 2,
             pixels: vec![1; 3],
         };
-        let different_size = KoharuLayoutMask {
+        let different_size = DetectionMask {
             x: 5,
             y: 5,
             width: 1,
@@ -2396,13 +2667,12 @@ mod tests {
             width: 64,
             height: 48,
         };
-        let local = |x, y, width, height, pixels: Vec<u8>| KoharuLayoutDetection {
-            label_id: 0,
+        let local = |x, y, width, height, pixels: Vec<u8>| Detection {
             label: "text".to_owned(),
             score: 1.0,
             bbox: [x as f32, y as f32, (x + width) as f32, (y + height) as f32],
             area: pixels.iter().filter(|value| **value != 0).count() as u32,
-            mask: KoharuLayoutMask {
+            mask: DetectionMask {
                 x,
                 y,
                 width,
@@ -2444,13 +2714,12 @@ mod tests {
                 let pixels = (0..width * height)
                     .map(|_| if next() % 3 == 0 { 0 } else { u8::MAX })
                     .collect::<Vec<_>>();
-                detections.push(KoharuLayoutDetection {
-                    label_id: 0,
+                detections.push(Detection {
                     label: "text".to_owned(),
                     score: 1.0,
                     bbox: [x as f32, y as f32, (x + width) as f32, (y + height) as f32],
                     area: pixels.iter().filter(|pixel| **pixel != 0).count() as u32,
-                    mask: KoharuLayoutMask {
+                    mask: DetectionMask {
                         x,
                         y,
                         width,
@@ -2559,13 +2828,12 @@ mod tests {
                 }
             }
         }
-        let detection = KoharuLayoutDetection {
-            label_id: 0,
+        let detection = Detection {
             label: "text".to_owned(),
             score: 1.0,
             bbox: [0.0, 0.0, width as f32, height as f32],
             area: pixels.iter().filter(|value| **value != 0).count() as u32,
-            mask: KoharuLayoutMask {
+            mask: DetectionMask {
                 x: 0,
                 y: 0,
                 width,

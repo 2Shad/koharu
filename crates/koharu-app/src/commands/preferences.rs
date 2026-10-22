@@ -179,8 +179,17 @@ pub(crate) async fn save_preferences(
 }
 
 fn remember_pipeline_profiles(config: &mut PipelineConfig) {
-    let koharu_pipeline::DetectionModel::KoharuLayoutRFDetrSeg2XL(settings) = &config.detection;
-    config.processor.koharu_layout_rfdetr_seg_2xl = Some(settings.clone());
+    match &config.detection {
+        koharu_pipeline::DetectionModel::KoharuLayoutRFDetrSeg2XL(settings) => {
+            config.processor.koharu_layout_rfdetr_seg_2xl = Some(settings.clone());
+        }
+        koharu_pipeline::DetectionModel::PpDocLayoutV3(settings) => {
+            config.processor.pp_doclayout_v3 = Some(settings.clone());
+        }
+        koharu_pipeline::DetectionModel::ComicLayoutYolo26s(settings) => {
+            config.processor.comic_layout_yolo26s = Some(settings.clone());
+        }
+    }
     if let koharu_pipeline::InpaintingModel::Flux2Klein(settings) = &config.inpainting {
         config.processor.flux2_klein = Some(settings.clone());
     }
