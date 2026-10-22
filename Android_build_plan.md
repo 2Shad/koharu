@@ -59,14 +59,16 @@ Rules that apply to every session:
 The port runs the full pipeline on a phone, and both native runtimes build locally. What
 remains is scale, numbers, and shipping:
 
-1. **The CI preview APK does not contain the runtimes.** They are ~600 MB and live in the
-   git-ignored `jniLibs`, and the preview job runs `cargo tauri android init`, which
-   regenerates `gen/android`. So `android-m5-preview`'s `app-universal-debug.apk` installs and
-   boots but stops at detection with `<model> needs the Torch runtime…`. Either attach the
-   local build to the release by hand, or teach the preview job to fetch a runtime tarball
-   from a release asset and extract it into `jniLibs` after `android init`. Building the
-   runtimes on a hosted runner is not realistic — the PyTorch cross-build needs
-   `ubuntu-latest-xl`.
+1. **Publish the runtime tarball.** The preview job now looks for
+   `android-runtimes/android-runtimes-arm64-v8a.tar.gz` on this repository's releases and
+   extracts it into `jniLibs` (falling back to an app shell with a notice when it is absent).
+   The tarball is built and sitting at `/tmp/android-runtimes-arm64-v8a.tar.gz` (74.5 MB
+   compressed, 323 MB extracted — libtorch 2.13, the tch shim, llama.cpp `b11642`, and the
+   NDK's `libc++_shared.so`):
+   `gh release create android-runtimes --title "Koharu Android runtimes" --notes "Prebuilt aarch64-linux-android runtimes" /tmp/android-runtimes-arm64-v8a.tar.gz`,
+   then re-tag a preview. Until then `android-m5-preview`'s APK installs and boots but stops
+   at detection with `<model> needs the Torch runtime…`. Building them on a hosted runner is
+   not realistic — the PyTorch cross-build needs `ubuntu-latest-xl`.
 2. **Scale to a chapter.** Only single pages have run. Process a whole CBZ unattended and
    watch for OOM kills, thermal throttling and the memory policy's eviction behaviour; that is
    the M3 exit criterion.
