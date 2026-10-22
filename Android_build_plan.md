@@ -56,37 +56,27 @@ Rules that apply to every session:
 
 ### Next session — start here
 
-> **Open defect: multi-page runs are OOM-killed.** A `process` over more than a page or
-> two grows the resident set until the OS kills the app (`ApplicationExitInfo reason=3
-> LOW_MEMORY`). Measured on the phone with a 3-page run: PSS 1.46 GB → 3.35 → 5.55 →
-> 7.70 → 9.62 → 11.68 → 13.40 → 14.30 GB in 100 s, then the process is gone; the device has
-> 15.6 GB total. Two separate effects are visible:
+> **Multi-page runs used to be OOM-killed; fixed 2026-10-22.** A `process` over more than a
+> page or two grew the resident set until the OS killed the app
+> (`ApplicationExitInfo reason=3 LOW_MEMORY`). Measured on the phone with a 3-page run:
+> PSS 1.46 GB → 3.35 → 5.55 → 7.70 → 9.62 → 11.68 → 13.40 → 14.30 GB in 100 s, then gone
+> (the device has 15.6 GB).
 >
-> 1. **Steady-state residency ≈ 5.4 GB** for a single page. Per stage, from a 326 MB
->    baseline: detection +80 MB, OCR +1.35 GB, translation +3.94 GB (E4B Q2_K_XL 3.22 GB
->    plus the 0.99 GB projector), inpainting +0. A fresh process that has run all four
->    stages sits at ~5.7 GB.
-> 2. **~4.5 GB of growth per additional page**, which is about one translation model per
->    page.
+> The cause was **not** the models staying loaded: `/proc/<pid>/smaps` showed no GGUF mapping
+> and no runtime library growth while the footprint stayed high. Aggregating `smaps` by
+> mapping name pinned it — `[anon:scudo:secondary]` alone was **2.16 GB**. Scudo (bionic's
+> allocator) keeps freed large allocations in a secondary cache instead of returning them to
+> the kernel, so every page's weights were freed into that cache and charged to the process,
+> and the next page pushed it over.
 >
-> Unloading does not appear to return memory: switching back to detection after a
-> translation run leaves PSS where it was (−14 MB), and a full run leaves `Native Heap` at
-> 4.74 GB with only 43 MB free. The teardown chain looks correct — `Stages::unload*` →
-> `ModelCell::take` → `Translator::unload` → `LocalTranslator` → `Llm` → `LlamaModel::drop`
-> → `llama_free_model`, with no global cache in `koharu-ml::llm` — so the next step is to
-> distinguish "eviction is not running" from "eviction runs and the allocator retains".
-> A `tracing::debug!` already sits at the eviction site
-> (`stages/mod.rs`, "unloaded model to keep one stage resident"); raise the log level, or log
-> `MemoryPolicy::for_platform()` once at startup, to tell the two apart. If the allocator is
-> the cause, the candidates are PyTorch's mimalloc (`-DUSE_MIMALLOC=OFF`) and llama.cpp's
-> mmap teardown.
+> `koharu_runtime::release_unused_memory()` now calls `mallopt(M_PURGE, 0)` on Android, and
+> the pipeline calls it wherever weights are dropped (`Stages::unload_except` /
+> `unload_all`, which already back the mobile eviction policy and the end-of-queue release).
+> It is a no-op off Android, where the allocator returns memory by itself.
 >
-> Until this is fixed, treat a run as single-page. `Run` defaults to the *selected* pages,
-> so the failure only shows up when you select several or widen the scope to the project.
-
-
-The port runs the full pipeline on a phone, and both native runtimes build locally. What
-remains is scale, numbers, and shipping:
+> Per-stage resident set from a 326 MB baseline, for reference: detection +80 MB, OCR
+> +1.35 GB, translation +3.94 GB (E4B Q2_K_XL 3.22 GB plus the 0.99 GB projector — the
+> projector is now only loaded when the Vision setting is on), inpainting +0.
 
 1. **Publish the runtime tarball.** The preview job now looks for
    `android-runtimes/android-runtimes-arm64-v8a.tar.gz` on this repository's releases and
