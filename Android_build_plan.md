@@ -19,10 +19,13 @@ what "done" means.
   **Device status:** the preview installs, boots, and **imports a page through the system
   picker** on a physical phone (Android 16, arm64), and **downloads Hugging Face files**
   (`config.json` + `model.safetensors` land in the store). The one blocking gap is the
-  external `koharu-rs/{llama,torch}` Android assets: they are not bundled, so a pipeline run
-  stops at the detection load. See [Next session](#next-session--start-here) for the exact
-  handoff. The port targets Android and desktop; a non-Android mobile build still compiles
-  with the pre-M1 "picker unavailable" behavior but is not supported.
+  external `koharu-rs/{llama,torch}` Android assets: they are not published and not bundled,
+  so no stage can load. That failure mode is now correct: the run **fails the job with a
+  readable error** naming the missing runtime instead of stalling (fixed 2026-10-22; the
+  stage load is guarded before the lazy `-sys` loader can panic, and the job task catches any
+  residual panic). See [Next session](#next-session--start-here) for the exact handoff. The
+  port targets Android and desktop; a non-Android mobile build still compiles with the pre-M1
+  "picker unavailable" behavior but is not supported.
 
 ## How to use this document
 
@@ -34,7 +37,8 @@ what "done" means.
 | 4 | M3 | [M3](#m3--libtorch-full-pipeline) |
 | 5 | M4 | [M4](#m4--touch-ui) |
 | 6 | M5–M6 | [M5](#m5--perf-thermal-device-matrix), [M6](#m6--release) |
-| 7 (next) | Native runtimes + device pass | [Next session](#next-session--start-here), [Debugging on a device](#debugging-on-a-device) |
+| 7 | Native runtimes + device pass | [Next session](#next-session--start-here), [Debugging on a device](#debugging-on-a-device) |
+| 8 (next) | Native runtimes + device pass | [Next session](#next-session--start-here) |
 
 Rules that apply to every session:
 
@@ -53,29 +57,34 @@ Rules that apply to every session:
 The port is code-complete through M6; what remains is the external native runtime and the
 device pass. In order:
 
-1. **Bundle the native runtimes — the only thing blocking a working pipeline.** Build
-   `libtorch_cpu.so` + `libkoharu-torch.so` (`koharu-rs/torch`) and `libllama.so` +
-   `libmtmd.so` (`koharu-rs/llama`) for `aarch64-linux-android`, then drop them into
-   `crates/koharu/gen/android/app/src/main/jniLibs/arm64-v8a/`. `tauri android build`
-   copies whatever is in `jniLibs` into the APK; nothing in this repo downloads them. The
-   consumer side is already in place (`Torch::AndroidCpu` / `Llama::AndroidCpu` are bundled
-   packages with bare sonames) — check the published asset's `DT_NEEDED` set against the
-   `android` props in `runtime/packages/{llama,torch}.rs` (currently mirrors the Linux list,
-   without `libgomp`). See [M2](#m2--llamacpp-engine) and [M3](#m3--libtorch-full-pipeline).
+1. **Produce the native runtimes — still the only thing blocking a working pipeline.** Build
+   `libc10.so` + `libtorch_global_deps.so` + `libtorch_cpu.so` + `libtorch.so` +
+   `libkoharu-torch.so` (`koharu-rs/torch`) and `libllama.so` + `libmtmd.so`
+   (`koharu-rs/llama`) for `aarch64-linux-android`, then run
+   `scripts/bundle-android-runtimes.sh <koharu-rs-checkout>` to copy them into
+   `crates/koharu/gen/android/app/src/main/jniLibs/arm64-v8a/` (git-ignored; `tauri android
+   build` copies whatever is there). Re-checked 2026-10-22: neither repository publishes an
+   Android asset, and neither can be built from this repository — `koharu-llama-sys` vendors
+   headers only and `koharu-torch-sys/libtch` is two headers. The torch build must pass
+   `-DUSE_OPENMP=OFF` to match the `android` props; see
+   [M3](#m3--libtorch-full-pipeline) for the verified `DT_NEEDED` set.
 2. **Run the pipeline on the phone.** With the libraries present, run detection → OCR →
-   translation → inpainting on a real page and confirm each stage loads and completes.
-3. **Decide hang vs error for a missing runtime.** The observed run stalled at the detection
-   stage with only `runtime package failed to activate … label=Torch android-cpu`, no job
-   failure, and no further log line. Confirm the pipeline surfaces a readable error instead
-   of hanging, and fix it if it does not — this is the first thing a user hits.
-4. **M4 exit gate:** run import → edit → typeset → export one-handed and capture screenshots
+   translation → inpainting on a real page and confirm each stage loads and completes. Without
+   them the run now fails fast with `<model> needs the Torch runtime, which is not available on
+   this device` — verified on the phone 2026-10-22.
+3. **M4 exit gate:** run import → edit → typeset → export one-handed and capture screenshots
    at 360×800, 412×915, and 800×1280 (plus a long-label case).
-5. **M1 exit criteria still open:** export PNG/PSD/CBZ through the tree picker, save a BYOK
-   key, and run a long job with the screen off.
+4. **M1 exit criteria still open:** export PNG/PSD/CBZ through the tree picker, save a BYOK
+   key, and run a long job with the screen off. The foreground-service crash that a
+   fast-failing job used to trigger is fixed, so a long job can now be observed end to end.
+5. **M0 leftover:** record `UNRESTRICTED_EXTERNAL_TEXTURE_COPIES` from the phone's WebView.
 6. **M2/M3 numbers:** run `bench` and `parity` on the reference devices and fill
    `packages/docs/hardware.mdx` (en/ja/zh).
-7. **M6 landing:** the signed AAB job needs `ANDROID_KEYSTORE_*`/`SENTRY_*`; then open the
-   upstream issue and split the branch into reviewable PRs.
+7. **M6 landing:** the signed AAB job needs `ANDROID_KEYSTORE_BASE64`,
+   `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, `SENTRY_AUTH_TOKEN`
+   secrets and the `SENTRY_ORG` variable, then `gh workflow run android.yml --ref <version-tag>`
+   (the `release-pr.yml` dispatch already exists); then open the upstream issue and split the
+   branch into reviewable PRs.
 
 ---
 
@@ -303,7 +312,8 @@ canvas path; rerun the probe on a physical GPU.
 job with the screen off.
 
 Device progress: import is verified — a real manga JPG imported through the system picker into
-a new project. The remaining items (tree export, Keystore key, long job with the screen off)
+a new project. The foreground-service crash that a fast-failing job triggered is fixed (see the
+risk register); the remaining items (tree export, Keystore key, long job with the screen off)
 are unverified. The import picker on the phone is the M1 implementation, not the M0 stub; the
 earlier "importing files is not supported" report came from the M0 preview.
 
@@ -322,7 +332,10 @@ multi-select document import, document-tree export, and create-document export.
       (NDK r27c, API 31, `GGML_OPENMP=OFF`, `GGML_LLAMAFILE=OFF`, KleidiAI on,
       `-Wl,-z,max-page-size=16384` for Play's 16 KB page rule)
       — external to this repository; the consumer side assumes both libraries are in the
-      APK's `jniLibs`
+      APK's `jniLibs`. Re-checked 2026-10-22: `koharu-rs/llama` publishes only
+      windows/linux/macos assets (latest `b11786`), so the Android asset does not exist yet.
+      This repository cannot produce it — `crates/koharu-llama-sys` vendors headers only
+      (`include/*.h`), with no llama.cpp sources.
 - [x] `Bundled` package source in `koharu-runtime`; Android arms in `Llama::discover` and
       `library_names()`
 - [x] Android hardware probe: CPU device always; Vulkan behind a setting, off by default
@@ -372,9 +385,16 @@ and no OOM.
       `aarch64-linux-android`; publish to `koharu-rs/torch`; bundle via jniLibs or an AAB
       feature module
       — external to this repository; the consumer side is done and `cargo ndk check -p koharu`
-      is green. The APK needs both libraries in `jniLibs` before a device run. The published
-      asset's `DT_NEEDED` set (including any OpenMP runtime) must match the `android` props in
-      `runtime/packages/torch.rs`, which currently mirrors the Linux list without `libgomp`.
+      is green. The APK needs both libraries in `jniLibs` before a device run. The `android`
+      props in `runtime/packages/torch.rs` were verified on 2026-10-22 against `readelf -d` of
+      the published `v2.13.0.7` Linux CPU asset: the set is correct **provided the Android
+      build passes `-DUSE_OPENMP=OFF`**. Otherwise `libtorch_cpu.so` and
+      `libtorch_global_deps.so` need an OpenMP runtime, which on the NDK is `libomp.so` (not a
+      platform library), so it would have to be bundled into `jniLibs` and added to the props.
+      `libtorch_global_deps.so` is a dlopen root only — nothing `DT_NEEDED`s it, but upstream
+      builds it unconditionally, so it stays in the props. `crates/koharu-torch-sys` vendors
+      the shim headers only, so `libkoharu-torch.so` cannot be produced here either.
+      Re-checked 2026-10-22: `koharu-rs/torch` publishes no Android asset.
 - [ ] Parity check: 5-page set, desktop vs Android → boxes, masks, OCR text, translations;
       record diffs
       — the `koharu-pipeline` `parity` bin landed (JSON report); the two reports need the
@@ -414,9 +434,11 @@ and the recorded parity/benchmark numbers.
 **Exit criteria:** a page can be imported, edited, typeset, and exported on a phone without
 a keyboard, mouse, or hover.
 
-Device progress: import, the mobile shell (app bar + Pages/Inspector/Activity sheets), and the
-canvas render on the phone. The edit → typeset → export pass and the screenshots are still
-open.
+Device progress: import, the mobile shell (app bar + Pages/Inspector/Activity sheets), the
+canvas render, and the Activity sheet's failure surface on the phone. The edit → typeset →
+export pass and the screenshots are still open. Capture them with an explicit display id: the
+foldable's default `screencap` target is the folded panel and comes back black (see
+[Debugging on a device](#debugging-on-a-device)).
 
 ---
 
@@ -441,7 +463,10 @@ open.
       (a `release` job in `.github/workflows/android.yml`; signing via a Gradle init script
       and the workspace version via `cargo metadata` + `--config`. The preview `build` job
       publishes the debug APK on `android-m*` tags; the signed AAB job still needs the
-      `ANDROID_KEYSTORE_*`/`SENTRY_*` secrets and has not run)
+      `ANDROID_KEYSTORE_*`/`SENTRY_*` secrets and has not run. Review fix 2026-10-22: the
+      keystore password/alias/password were scoped to the "configure signing" step's `env:`
+      only, so the later Gradle build step saw them empty — all four keys now go to
+      `$GITHUB_ENV`)
 - [ ] Play internal track, arm64 ABI split, native symbol upload (`.github/sentry.sh` has no
       Android branch)
       — ABI split and the sentry Android branch landed; the Play internal-track upload is
@@ -464,7 +489,8 @@ open.
 | Detection model contract mismatch | Pipeline quality | Two-way spike with parity comparison | M3 |
 | `native-tls`/OpenSSL in the NDK build | Build failure | Switch to rustls first | M0 |
 | `rustls-platform-verifier` (reached through `reqwest` and `hf-hub`) on Android | Every Hugging Face download hung with no error | Resolved: `hf-hub` (whose private `no_redirect_client` bypassed the injected TLS config) is dropped; downloads go over the shared client with bundled Mozilla roots via `configure_reqwest_tls` | M4 |
-| Bundled runtime missing at model load | Pipeline stalls instead of erroring | Confirm the pipeline surfaces a readable error and stops the job; the observed detection-stage stall is the symptom to fix | M3 |
+| Bundled runtime missing at model load | Pipeline stalls instead of erroring | Resolved 2026-10-22: `koharu_ml::features()` exposes the runtimes that activated; every stage load fails with an error naming the runtime it needs before the lazy `-sys` loader can panic, and the `process` task catches a residual panic so the job always reaches a terminal `Failed` state | M4/closed |
+| Work that finishes within milliseconds killed the app | `Run` on a job that fails fast (missing runtime, bad input) crashed the process with `ForegroundServiceDidNotStartInTimeException` | Fixed 2026-10-22: the stop is handed to the service and applied only after it is foregrounded, so a stop that overtakes its start can no longer satisfy the `startForegroundService` deadline | M1/closed |
 
 ---
 
@@ -510,6 +536,18 @@ Signals to reach for, in order:
   `tauri-plugin-log` is configured with `clear_targets()` and a single `LogDir` target, so
   this file is the only Rust output; `adb logcat` has none. `store:` lines trace the runtime
   store's lock → stage → publish transitions and are the fastest way to localise a download.
+- **`adb logcat` is not readable on the test phone.** Its vendor privacy wrapper
+  ("HKS") replaces every line with an opaque token (`ring buffer is … 0 B readable`), including
+  the `crash` buffer. Get Java-level failures from `adb shell dumpsys dropbox --print`
+  instead: it carries the process, the exception, the full stack, `Lifetime`, and the
+  `Crash-Handler`. `adb shell dumpsys activity services` shows the live `ServiceRecord` state
+  (`startRequested`, `isForeground`, `startForegroundCount`) while the process is up. This is
+  how the foreground-service start/stop race was found.
+- **Screenshots need an explicit display on this foldable.** `adb exec-out screencap -p`
+  grabs the first display, which is the folded inner panel and reports `state OFF`, so the
+  image is black. List the ids with `adb shell dumpsys SurfaceFlinger --display-id` and capture
+  the active one: `adb shell screencap -d 4630946324137792660 -p /sdcard/shot.png` then
+  `adb pull`. The app renders on the 1060 × 2376 display.
 - **Runtime store:** `adb shell run-as rs.koharu.app ls -R runtime` — files live at
   `runtime/hugging-face/{models,datasets}/<repo>/snapshots/<revision>/<file>` with a
   `.<file>.lock` beside each. A `.lock` with no matching file means the download never
@@ -594,9 +632,10 @@ dev server over the network, set `TAURI_DEV_HOST` to the host LAN address instea
   Still open until the `koharu-rs/torch` Android asset exists.
 - OCR language selection: the mobile default is Manga OCR (Japanese). Auto-selecting
   MangaOCR vs. PaddleOCR-VL GGUF per page language is not implemented.
-- A missing bundled runtime: the pipeline currently stalls at the detection load with only the
-  "runtime package failed to activate" warning. Decide whether it should fail the job with a
-  readable error (preferred) and implement it.
+- A missing bundled runtime: resolved 2026-10-22. A stage whose runtime did not activate now
+  fails the job with a readable error (`<model> needs the Torch runtime, which is not
+  available on this device`) instead of stalling, and the job task catches a residual panic so
+  the job cannot stay `Running` forever.
 - Android TLS trust: `configure_reqwest_tls` uses bundled Mozilla roots, so user-installed and
   corporate CAs are ignored. Revisit only if a user needs them — that would mean initializing
   `rustls-platform-verifier` over JNI with the `rustls-platform-verifier-android` component.
@@ -625,3 +664,4 @@ and what the next session should pick up.
 | 2026-10-22 | M4/M5/M6 review fixes | Applied the code-review findings. Rust: `cargo fmt` across the workspace (the modified `output.rs`/`lib.rs`/`local/mod.rs` plus three pre-existing unformatted files — `koharu-ml/llm/model.rs`, `koharu-runtime/runtime/packages/llama.rs`, `koharu-translator/bin/bench.rs`) so `cargo fmt -- --check` is green. Frontend: removed the unreachable `platform === 'mobile'` early return in `RightSidebar` (only mounted on desktop), deleted the dead `clamp` helper in `ToolBar`, and spaced the mobile rotate handle + raised corner-handle hit priority in `SelectionControls` so the 44 px boxes stop overlapping on small selections (desktop unchanged). Docs: documented the `[runtime] battery_saver` key in `hardware.mdx` (en/ja/zh) and dropped the outbound "share sheet" mention from the Android import note in `quickstart.mdx` (en/ja/zh). Plan: clarified the M6 CI note to distinguish the preview debug APK from the unrun signed AAB job. Verified: `cargo fmt --check`, `tsc --noEmit`, oxlint, focused vitest (editor-components + workspace), `cargo check`, `cargo ndk -t arm64-v8a check -p koharu`. Note on the earlier "importing files is not supported" report: that string came from the M0 preview, which shipped the `#[cfg(mobile)]` picker stub; M1 replaced it with the SAF `pickImport` implementation (`KoharuPlugin.kt`), so the current build imports through the system picker. | Test the preview APK on a physical phone; capture the M4 screenshots; publish the `koharu-rs/{llama,torch}` assets; configure the release secrets |
 | 2026-10-22 | M4 device fix | Debugged the "download stuck on `config.json`" report on a physical phone (Android 16, arm64). Cause: `reqwest`'s `rustls` backend verifies through `rustls-platform-verifier`, which on Android must be initialized over JNI against the host activity; without that it panics at `android.rs:90` on the first handshake. Because the model download runs in a detached task, the panic unwound the task silently — the `Started` download event had no terminal event, so the activity center showed "downloading config.json" forever and the runtime store kept only a stale `.config.json.lock`. Verified with a standalone on-device probe against the app's exact client config. Fix, two parts. (1) `koharu-runtime::configure_reqwest_tls` builds a `rustls::ClientConfig` from the bundled Mozilla roots (`webpki-roots`) on Android (platform verifier kept on desktop) and is used by `network::http()` and the translator's provider client. (2) `HuggingFaceFile` no longer uses `hf-hub`: `HFClient::build` always creates an internal `no_redirect_client` with default reqwest TLS settings and runs the download probe through it, so it bypasses the caller's configuration and panics on Android regardless of the injected client. Downloads now hit `/{repo}/resolve/{revision}/{file}` (and the `datasets/` variant) over the shared client, and `hf-hub` is dropped from the workspace. Trade-off: Android no longer trusts user-installed CAs. | Verify a full detection/OCR/translation run on the phone; publish the `koharu-rs/{llama,torch}` assets so the stages can load |
 | 2026-10-22 | M4 device verification + release | Installed the preview on a physical phone (Android 16, arm64, minSdk 31) and drove the whole flow over adb + WebView CDP: create a project, import a real manga JPG through the system picker, pick a model, Run. The import picker works (the M0 stub is gone), and after the download fix the model files land — `config.json` (353 B) and `model.safetensors` (44 MB) in `runtime/hugging-face/models/mayocream--comic-layout-yolo26s/snapshots/<rev>/`, with `store: staged ok=true`. The run then stalls at the detection load because the bundled runtimes are absent (`Torch android-cpu` / `llama android-cpu` failed to activate) and no job failure is recorded — see [Open questions](#open-questions). Committed `c2c60237`, pushed, tagged `android-m4-preview-2`; CI green; the prerelease carries `app-universal-debug.apk`. Added a [Debugging on a device](#debugging-on-a-device) section (adb-over-TCP, the app log file, WebView CDP, the store layout, and the standalone-probe recipe). | Bundle `koharu-rs/{llama,torch}` into `jniLibs`, re-run the pipeline on the phone, decide hang-vs-error for a missing runtime, then the M4 screenshots and the M1 exit criteria |
+| 2026-10-22 | Failure mode + native-runtime prep + device pass | Fixed the missing-runtime stall. `koharu-ml` now exposes `features()` (set from `runtime.features()` inside `init`), and `koharu-pipeline` guards each stage load with `require_runtime(model, feature)` so a stage whose runtime did not activate fails with `<model> needs the <feature> runtime, which is not available on this device` before the lazy `-sys` loader can `panic!`; `processing.rs` wraps `pipeline.execute` in `catch_unwind` so a residual panic still releases the stop token and publishes a terminal `Failed` job. Found and fixed a second app-killing bug on the device: work that finishes within milliseconds crashed the process with `ForegroundServiceDidNotStartInTimeException`, because `Guard::drop` sent Stop while `startForegroundService` was still in flight, tearing the service down before `onStartCommand` reached `startForeground`. `ForegroundService` now hands the stop to the service and applies it only after it is foregrounded (`startPending`/`stopPending`, and every intent is foregrounded before its action is interpreted). Native runtimes: reconciled the `android` props against `readelf -d` of the published Linux `v2.13.0.7` CPU asset (`libtorch_cpu.so` needs `libc10` + an OpenMP runtime; the NDK's is `libomp.so`, so the Android build must pass `-DUSE_OPENMP=OFF`; `libtorch_global_deps.so` is a dlopen root only). `graph.rs` now logs the full cause chain, `Torch::activate` names the library that failed, and `scripts/bundle-android-runtimes.sh` copies the seven libraries into `jniLibs`. M6: the release job's keystore password/alias/password were scoped to the "configure signing" step, so Gradle saw them empty — all four keys now go to `$GITHUB_ENV`. Also fixed the pre-existing `clippy::double_must_use` error in `koharu-runtime::lib.rs` that kept `cargo clippy --workspace -- -D warnings` red. Verified: `cargo fmt -- --check`, `cargo clippy --workspace -- -D warnings`, `cargo ndk -t arm64-v8a check -p koharu`, `cargo test -p koharu-pipeline --lib` (54 pass), the new `android.yml` parses, `bash -n .github/sentry.sh`. On the phone (test phone, Android 16, arm64, 1060 × 2376): installed the debug APK over the preview, imported project opens, and `Run` now fails fast with the readable error shown in the Activity sheet (`/tmp/shot3.png`) in 5/5 runs with no crash, where 3 of 4 runs previously killed the process. Not verified: no native runtime exists to bundle — `koharu-rs/{torch,llama}` publish no Android asset and this repository vendors headers only — so no stage can load and no M2/M3 numbers exist; the WebGPU probe, export/keys/long-job and the M4 screenshots remain open. Documented two device quirks in [Debugging on a device](#debugging-on-a-device): `adb logcat` is redacted on this phone (use `dumpsys dropbox --print`), and `screencap` needs `-d <display-id>` on the foldable. | Produce the Android runtime assets and run `scripts/bundle-android-runtimes.sh`, then run detection → OCR → translation → inpainting on the phone; capture the M4 screenshots; then the M1 exit criteria |
