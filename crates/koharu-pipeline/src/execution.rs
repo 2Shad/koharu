@@ -118,6 +118,13 @@ impl<'a> Execution<'a> {
             }
         }
 
+        // A platform that evicts between stages keeps nothing resident, so an
+        // idle process must not hold the last model it happened to use: on a
+        // phone that is gigabytes of weights, and the OS kills the app for it.
+        if runner.evicts_between_stages() {
+            runner.unload_all();
+        }
+
         self.finalize()
     }
 

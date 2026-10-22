@@ -24,7 +24,7 @@ pub struct LocalTranslator {
 }
 
 impl LocalTranslator {
-    pub async fn load(device: Device, selection: &ModelSelection) -> Result<Self> {
+    pub async fn load(device: Device, selection: &ModelSelection, vision: bool) -> Result<Self> {
         let model = selection
             .model
             .as_deref()
@@ -34,7 +34,7 @@ impl LocalTranslator {
             .copied()
             .find(|descriptor| descriptor.id == model)
             .with_context(|| format!("unknown local translator '{model}'"))?;
-        let resolved = descriptor.resolve(selection).await?;
+        let resolved = descriptor.resolve(selection, vision).await?;
         let options = LoadOptions {
             mtmd: resolved.projector.map(MtmdOptions::new),
             // Android loads through the lean mobile profile; `None` on desktop.
@@ -51,7 +51,9 @@ impl LocalTranslator {
         let llm = Llm::load_with_options(device, resolved.model, options)
             .await
             .context("failed to load local translation model")?;
-        if llm.capabilities().vision != descriptor.projector.is_some() {
+        // Only meaningful when the projector was requested: without it the model
+        // reports no vision capability, which is the intended state.
+        if vision && llm.capabilities().vision != descriptor.projector.is_some() {
             return Err(anyhow::anyhow!(
                 "local translator vision capability does not match its catalog"
             )

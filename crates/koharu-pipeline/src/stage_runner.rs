@@ -32,6 +32,17 @@ impl StageRunner {
         })
     }
 
+    /// Whether this platform keeps no stage resident between loads.
+    pub(crate) fn evicts_between_stages(&self) -> bool {
+        self.accelerator.evicts_between_stages()
+    }
+
+    /// Releases every stage's weights. Platforms that evict between stages call
+    /// this when the queue drains, so an idle process holds no model weights.
+    pub(crate) fn unload_all(&self) {
+        self.stages.unload_all();
+    }
+
     #[tracing::instrument(skip_all)]
     pub(crate) async fn run(&self, job: StageJob) -> StageCompletion {
         let started = Instant::now();
