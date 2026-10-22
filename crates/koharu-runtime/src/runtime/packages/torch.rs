@@ -42,6 +42,12 @@ pub enum Torch {
         )
     )]
     Rocm,
+    // The Android APK bundles libtorch in `jniLibs`; the list mirrors the Linux
+    // set minus the GNU OpenMP runtime. That is the props half of the build
+    // contract: the Android libtorch build must use `-DUSE_OPENMP=OFF` (the
+    // equivalent of llama's `GGML_OPENMP=OFF`). A dynamic OpenMP dependency
+    // would be the NDK's `libomp.so`, not `libgomp.so.1`, and would have to be
+    // bundled and listed here as well.
     #[strum(
         serialize = "android-cpu",
         props(
@@ -184,7 +190,8 @@ impl RuntimePackage for Torch {
     async fn activate(self) -> Result<()> {
         let directory = self.install().await?;
         for library in self.library_names()? {
-            loader::load(directory.join(library), false)?;
+            loader::load(directory.join(library), false)
+                .with_context(|| format!("failed to load Torch library {library}"))?;
         }
         Ok(())
     }

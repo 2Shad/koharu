@@ -134,7 +134,12 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/signing"
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/signing/upload.jks"
-          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/signing/upload.jks" >> "$GITHUB_ENV"
+          {
+            echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/signing/upload.jks"
+            echo "ANDROID_KEYSTORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD"
+            echo "ANDROID_KEY_ALIAS=$ANDROID_KEY_ALIAS"
+            echo "ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
           mkdir -p "$HOME/.gradle/init.d"
           cat > "$HOME/.gradle/init.d/koharu-signing.gradle" <<'GRADLE'
           allprojects {

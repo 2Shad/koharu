@@ -29,7 +29,6 @@ pub fn http_client() -> anyhow::Result<reqwest::Client> {
 /// before the first handshake and otherwise aborts it. The bundled Mozilla
 /// roots stand in there; desktop keeps the platform verifier, which needs no
 /// setup and honours the operating system trust store.
-#[must_use]
 pub fn configure_reqwest_tls(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
     #[cfg(target_os = "android")]
     {
