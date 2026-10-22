@@ -21,3 +21,27 @@ pub use store::Store;
 pub fn http_client() -> anyhow::Result<reqwest::Client> {
     network::http()
 }
+
+/// Applies Koharu's TLS trust configuration to a `reqwest` client builder.
+///
+/// `reqwest`'s `rustls` backend verifies against `rustls-platform-verifier`,
+/// which on Android must be initialized through JNI against the host activity
+/// before the first handshake and otherwise aborts it. The bundled Mozilla
+/// roots stand in there; desktop keeps the platform verifier, which needs no
+/// setup and honours the operating system trust store.
+#[must_use]
+pub fn configure_reqwest_tls(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+    #[cfg(target_os = "android")]
+    {
+        let mut roots = rustls::RootCertStore::empty();
+        roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        let tls = rustls::ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        builder.use_preconfigured_tls(tls)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        builder
+    }
+}

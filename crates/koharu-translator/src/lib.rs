@@ -145,7 +145,7 @@ impl Translator {
         let providers = providers.read()?.clone();
         let client = CLIENT
             .get_or_try_init(|| async {
-                reqwest::Client::builder()
+                koharu_runtime::configure_reqwest_tls(reqwest::Client::builder())
                     .timeout(Duration::from_secs(5))
                     .build()
             })

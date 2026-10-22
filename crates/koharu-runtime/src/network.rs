@@ -40,11 +40,12 @@ pub(crate) fn http() -> Result<Client> {
         return Ok(client.clone());
     }
     let config = config()?;
-    let client = Client::builder()
+    let builder = Client::builder()
         .user_agent(USER_AGENT)
         .connect_timeout(Duration::from_secs(config.connect_timeout.max(1)))
         .http2_adaptive_window(true)
-        .tcp_keepalive(Duration::from_secs(60))
+        .tcp_keepalive(Duration::from_secs(60));
+    let client = crate::configure_reqwest_tls(builder)
         .build()
         .context("failed to build HTTP client")?;
     Ok(HTTP_CLIENT.get_or_init(|| client).clone())

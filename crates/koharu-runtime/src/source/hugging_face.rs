@@ -1,24 +1,6 @@
-use std::{path::PathBuf, sync::OnceLock};
+use std::path::PathBuf;
 
-use hf_hub::{HFClient, HFRepository, RepoType, repository::download::HFByteStream, split_id};
-
-use crate::{Store, download, network};
-
-static CLIENT: OnceLock<HFClient> = OnceLock::new();
-
-fn client() -> anyhow::Result<HFClient> {
-    if let Some(client) = CLIENT.get() {
-        return Ok(client.clone());
-    }
-    let max_retries = network::config()?.max_retries as usize;
-    let http = network::http()?;
-    let client = HFClient::builder()
-        .client(http)
-        .cache_enabled(false)
-        .retry_max_attempts(max_retries)
-        .build()?;
-    Ok(CLIENT.get_or_init(|| client).clone())
-}
+use crate::{Store, download};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum RepositoryKind {
@@ -59,33 +41,33 @@ impl<'a> HuggingFaceFile<'a> {
         self.path().is_file()
     }
 
+    /// Downloads the pinned revision into the store over the shared HTTP client.
+    ///
+    /// `hf-hub` is deliberately not used: its client builder always creates an
+    /// internal reqwest client with default TLS settings and issues the download
+    /// probe through it, which bypasses the caller's TLS configuration and
+    /// fails certificate verification on Android. The public resolve endpoint
+    /// redirects to the CDN, so a plain ranged GET reproduces the same bytes.
     #[tracing::instrument(skip_all)]
     pub async fn resolve(self) -> anyhow::Result<PathBuf> {
+        let url = self.url();
         Store::file(self.path(), move |stage| async move {
-            let client = client()?;
-            let (owner, name) = split_id(self.repository);
-            download::receive(self.filename, &stage, async {
-                match self.kind {
-                    RepositoryKind::Model => self.download(client.model(owner, name)).await,
-                    RepositoryKind::Dataset => self.download(client.dataset(owner, name)).await,
-                }
-            })
-            .await
+            download::fetch(&url, &stage).await
         })
         .await
     }
 
-    async fn download(
-        self,
-        repository: HFRepository<impl RepoType>,
-    ) -> anyhow::Result<(Option<u64>, HFByteStream)> {
-        repository
-            .download_file_stream()
-            .filename(self.filename)
-            .revision(self.revision)
-            .send()
-            .await
-            .map_err(Into::into)
+    fn url(self) -> String {
+        let base = match self.kind {
+            RepositoryKind::Model => "https://huggingface.co",
+            RepositoryKind::Dataset => "https://huggingface.co/datasets",
+        };
+        format!(
+            "{base}/{repository}/resolve/{revision}/{filename}",
+            repository = self.repository,
+            revision = self.revision,
+            filename = self.filename,
+        )
     }
 
     fn path(self) -> PathBuf {
