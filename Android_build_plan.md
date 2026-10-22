@@ -611,6 +611,98 @@ practical. Page size is 4 KB, so 16 KB library alignment is not exercised by thi
 
 ---
 
+## Building the Android runtimes
+
+Neither runtime is buildable from this repository (`koharu-llama-sys` and
+`koharu-torch-sys` vendor headers only), and neither upstream publishes an
+Android asset. A working device build therefore needs both produced locally
+first. The scripts live at `$HOME/build-android/` on the dev host:
+`build.sh` (llama), `configure.sh` + `shim/` (torch), and the PyTorch source
+patch as `koharu-pytorch-android.patch`.
+
+**llama.cpp** — the `koharu-rs/llama` CMake wrapper around upstream
+`ggml-org/llama.cpp` at tag **`b11642`** (byte-identical to the headers in
+`crates/koharu-llama-sys/include`, so the version is not optional). The wrapper
+only accepts CUDA/HIP/VULKAN/METAL, so it needs a local patch adding a `CPU`
+backend (dedupe `ggml-cpu` in the WHOLE_ARCHIVE target list). Configure with the
+NDK toolchain, `-DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-31`,
+`GGML_OPENMP=OFF`, `GGML_LLAMAFILE=OFF`, `GGML_CPU_KLEIDIAI=ON`, then build the
+`llama mtmd` targets. Yields `libllama.so` (55 MB) + `libmtmd.so` (21 MB) with
+only libc/libm/libdl/liblog in `DT_NEEDED` — the ggml static targets are folded
+into `libllama`, which is what the two-name prop set assumes. Note KleidiAI does
+nothing for the Q2_K_XL quant: the device logs `no kernel for tensor type tq2_0,
+not accelerated by KleidiAI`.
+
+**libtorch** — PyTorch `v2.13.0` cross-compiled for Android. Android is
+normally a *mobile* build, and `c10/macros/Macros.h` defines `C10_MOBILE` from
+`__ANDROID__` regardless of CMake, which (a) drops the C++ frontend and autograd
+the tch shim links against and (b) localizes symbols. The build therefore sets
+`KOHARU_FULL_LIBTORCH` to opt out of the CMake mobile path and needs four source
+patches, all in `koharu-pytorch-android.patch`:
+
+1. `CMakeLists.txt` — gate `INTERN_BUILD_MOBILE` with `AND NOT
+   KOHARU_FULL_LIBTORCH`, so `NO_API`/autograd stay on.
+2. `cmake/Dependencies.cmake` — put `ANDROID` in the pthreadpool gate
+   (`C10_MOBILE` is still defined, so `ATen/ParallelNative.cpp` needs
+   `caffe2::pthreadpool`).
+3. `cmake/Dependencies.cmake` — link the full `onnx` library on Android when
+   `KOHARU_FULL_LIBTORCH`; the default Android path links only `onnx_proto`,
+   but the non-mobile JIT serialization sources call ONNX's checker and shape
+   inference. (Their headers also have to be on the include path; copying
+   `third_party/onnx/onnx/*.h` into the build tree does it.)
+4. `aten/src/ATen/DynamicLibrary.cpp` — compile its implementation even under
+   `C10_MOBILE`, which the JIT CPU fuser needs.
+5. `third_party/mimalloc/CMakeLists.txt` — drop `-ftls-model=initial-exec` on
+   Android. mimalloc is linked into `libc10.so` and bionic refuses an
+   initial-exec TLS relocation in a `dlopen`ed library
+   (`TLS symbol "(null)" … using IE access model`), which is exactly how the
+   app loads its bundled runtimes. Check with
+   `readelf -rW libc10.so | grep -c TLS_TPREL64` — it must be 0.
+6. `caffe2/CMakeLists.txt` — compile `aten/src/ATen/core/dynamic_type.cpp` with
+   `-fvisibility=default`. The JIT IR header instantiates
+   `c10::DynamicType::fallback()` from a template the shim uses, and the global
+   `-fvisibility=hidden` keeps it out of `libtorch_cpu.so`'s dynamic symbol
+   table, so the shim fails to load (`cannot locate symbol
+   _ZNK3c1011DynamicType8fallbackEv`).
+
+To check the shim will load before spending an APK build on it, diff its
+undefined symbols against everything the runtime libraries export:
+
+```sh
+nm -D --undefined-only libkoharu-torch.so | awk '{print $1}' | sort -u > /tmp/u
+cat libc10.so libtorch_cpu.so libtorch.so libtorch_global_deps.so \
+  | nm -D --defined-only - | awk '{print $1}' | sort -u > /tmp/d
+comm -23 /tmp/u /tmp/d | grep -v '@LIBC'
+```
+
+Anything left other than the weak `_ZTH14torch_last_err` (the shim's
+`torch_last_err` TLS init, which bionic tolerates unresolved) will fail at
+`dlopen`.
+
+Other required configuration: host `protoc` via
+`-DCAFFE2_CUSTOM_PROTOC_EXECUTABLE` (a cross build cannot run its own),
+`-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON`, `-DUSE_OPENMP=OFF` (the props list
+no OpenMP runtime), `-DUSE_KLEIDIAI=OFF`, Eigen under `third_party/eigen`, and
+`-DBLAS=Eigen -DUSE_MKLDNN=OFF -DUSE_FBGEMM=OFF -DUSE_XNNPACK=OFF
+-DUSE_PYTORCH_QNNPACK=OFF`. Expect ~1-2 h and ~20 GB; the `libtorch_cpu.so` link
+is the peak. Result: `libtorch_cpu.so` 215 MB, `libc10.so`, `libtorch.so`,
+`libtorch_global_deps.so`, all 16 KB-aligned.
+
+**The shim** (`koharu-rs/torch`) then builds against the install tree with
+`find_package(Torch)`. Two Android-specific details: the NDK toolchain restricts
+config-mode package search to the sysroot, so pass `-DTorch_DIR=<install>/share/cmake/Torch`
+(and `CMAKE_FIND_ROOT_PATH_MODE_* = BOTH`); and the NDK links shared objects with
+`-z defs` while desktop allows undefined symbols, so `-DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,undefs"`
+is required to match desktop's lazy-resolution behaviour. Yields
+`libkoharu-torch.so` (18 MB, 2734 exported `at_*`/`atg_*` symbols).
+
+Finally `scripts/bundle-android-runtimes.sh <llama-dir> <torch-dir>` copies all
+seven libraries plus the NDK's `libc++_shared.so` into `jniLibs/arm64-v8a/`.
+The five torch names and the two llama names must stay identical to the
+`android` props in `runtime/packages/{torch,llama}.rs`.
+
+---
+
 ## Prerequisites
 
 The dev host now has the toolchain:
