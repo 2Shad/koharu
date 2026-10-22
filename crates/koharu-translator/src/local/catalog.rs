@@ -1058,11 +1058,14 @@ impl LocalModelDescriptor {
     pub(crate) async fn resolve(
         self,
         selection: &ModelSelection,
+        vision: bool,
     ) -> anyhow::Result<ResolvedLocalModel> {
         let filename = self.filename(selection.quantization.as_deref())?;
         let model = self.file(filename).resolve();
+        // The page-image projector is ~1 GB. Only fetch and load it when
+        // translation will actually feed page images to the model.
         let projector = async {
-            match self.projector {
+            match self.projector.filter(|_| vision) {
                 Some(filename) => Ok(Some(self.file(filename).resolve().await?)),
                 None => Ok(None),
             }

@@ -133,6 +133,17 @@ impl Stages {
         }
         unloaded
     }
+
+    /// Drops every stage's weights. A platform that keeps nothing resident
+    /// between jobs calls this once the queue drains, so the process does not
+    /// sit on a multi-gigabyte model while idle and get killed for it.
+    pub(crate) fn unload_all(&self) -> bool {
+        let mut unloaded = false;
+        for stage in Stage::ALL {
+            unloaded |= self.unload(stage);
+        }
+        unloaded
+    }
 }
 
 fn generation(producer: &str, model: &str) -> Result<Generation> {

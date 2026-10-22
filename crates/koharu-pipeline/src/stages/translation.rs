@@ -36,7 +36,9 @@ impl StageProcessor for Processor {
         if self.config.model.provider == koharu_translator::Provider::Local {
             require_runtime(self.model(), koharu_ml::Feature::Llama)?;
         }
-        self.translator.load_model(&self.config.model).await
+        self.translator
+            .load_model(&self.config.model, &self.config.generation)
+            .await
     }
 
     async fn process(&self, input: StageInput) -> Result<koharu_scene::Patch> {

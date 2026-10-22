@@ -33,12 +33,17 @@ pub struct Translator {
 struct LoadedLocal {
     model: Option<String>,
     quantization: Option<String>,
+    /// Whether the page-image projector was loaded alongside the weights. The
+    /// projector is ~1 GB, so it is only held when translation will use it.
+    vision: bool,
     translator: Arc<LocalTranslator>,
 }
 
 impl LoadedLocal {
-    fn matches(&self, selection: &ModelSelection) -> bool {
-        self.model == selection.model && self.quantization == selection.quantization
+    fn matches(&self, selection: &ModelSelection, vision: bool) -> bool {
+        self.model == selection.model
+            && self.quantization == selection.quantization
+            && self.vision == vision
     }
 }
 
@@ -67,16 +72,17 @@ impl Translator {
     }
 
     #[must_use]
-    pub fn loaded(&self, selection: &ModelSelection) -> bool {
+    pub fn loaded(&self, selection: &ModelSelection, generation: &GenerationConfig) -> bool {
         if selection.provider != Provider::Local {
             return true;
         }
+        let vision = Self::supports_vision(selection, generation);
         self.local
             .try_lock()
             .map(|loaded| {
                 loaded
                     .as_ref()
-                    .is_some_and(|loaded| loaded.matches(selection))
+                    .is_some_and(|loaded| loaded.matches(selection, vision))
             })
             .unwrap_or(true)
     }
@@ -89,9 +95,14 @@ impl Translator {
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn load_model(&self, selection: &ModelSelection) -> anyhow::Result<()> {
+    pub async fn load_model(
+        &self,
+        selection: &ModelSelection,
+        generation: &GenerationConfig,
+    ) -> anyhow::Result<()> {
         if selection.provider == Provider::Local {
-            self.local(selection).await?;
+            self.local(selection, Self::supports_vision(selection, generation))
+                .await?;
         }
         Ok(())
     }
@@ -110,7 +121,9 @@ impl Translator {
 
         let generation = generation.for_model(selection);
 
-        if Self::supports_vision(selection, &generation) {
+        let vision = Self::supports_vision(selection, &generation);
+
+        if vision {
             request.prepare_image()?;
         } else {
             request.remove_image();
@@ -118,7 +131,7 @@ impl Translator {
 
         let expected = request.segments.len();
         let translated = if provider == Provider::Local {
-            self.local(selection)
+            self.local(selection, vision)
                 .await?
                 .translate(request, generation)
                 .await?
@@ -155,16 +168,23 @@ impl Translator {
         Ok(models)
     }
 
-    async fn local(&self, selection: &ModelSelection) -> Result<Arc<LocalTranslator>> {
+    async fn local(
+        &self,
+        selection: &ModelSelection,
+        vision: bool,
+    ) -> Result<Arc<LocalTranslator>> {
         let mut loaded = self.local.lock().await;
         if loaded
             .as_ref()
-            .is_none_or(|loaded| !loaded.matches(selection))
+            .is_none_or(|loaded| !loaded.matches(selection, vision))
         {
             *loaded = Some(LoadedLocal {
                 model: selection.model.clone(),
                 quantization: selection.quantization.clone(),
-                translator: Arc::new(LocalTranslator::load(self.device.clone(), selection).await?),
+                vision,
+                translator: Arc::new(
+                    LocalTranslator::load(self.device.clone(), selection, vision).await?,
+                ),
             });
         }
         Ok(Arc::clone(
