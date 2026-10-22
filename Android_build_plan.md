@@ -7,27 +7,31 @@ what "done" means.
 - **Repository:** `$HOME/Koharu/koharu`
 - **Baseline:** `main` @ `88d07ef0`, workspace version `0.83.5`, Tauri `3.0.0-alpha.5`
   (git rev `40a2d81d97f5c950e892fa7a6ce8b03064410c4d`), CEF runtime on desktop.
+- **Branch:** `android`, tip `8b0185a6`. Preview release
+  [`android-m5-preview`](https://github.com/2Shad/koharu/releases/tag/android-m5-preview).
 - **Status date:** 2026-10-22
-- **Current state:** the `android` branch carries M0–M6 code and the port **works end to end
-  on a physical phone**. M0–M3 landed (platform services, the bundled llama/torch consumer
-  side, the mobile load profile and RAM budgets, the YOLO26s/Manga-OCR/AOT mobile defaults,
-  the `parity`/`bench` harnesses, docs). M4 landed: the mobile editor (app bar +
-  Pages/Inspector/Activity bottom sheets, touch gestures, 44 px targets, the `share` command,
-  11 locales). M5 landed (`[runtime] battery_saver`) plus the two native runtimes themselves.
-  M6 landed as configuration: the preview `build` job publishes the debug APK on `android-m*`
-  tags (`android-m5-preview`); the signed AAB job is unrun and needs the signing secrets.
-  **Device status:** the port **runs the whole pipeline on a physical phone** (Android 16,
-  arm64): detection → OCR → translation → inpainting → typeset, producing a translated page
-  from a Japanese one with no job failure. Both native runtimes are built for
-  `aarch64-linux-android` and bundled (see
-  [Building the Android runtimes](#building-the-android-runtimes)) — libtorch 2.13 with the tch
-  shim, and llama.cpp `b11642`. Import, PNG/CBZ/PSD export, the Keystore credential round
-  trip, the WebGPU probe, and the M4 layouts at 360×800 / 412×915 / 800×1280 are all verified
-  on the device. What is *not* verified: a multi-page chapter run, the M2/M3
-  benchmark/parity numbers, BYOK remote providers, exports with the screen off, and the M6
-  release path. See [Next session](#next-session--start-here) for the exact handoff. The
-  port targets Android and desktop; a non-Android mobile build still compiles with the pre-M1
-  "picker unavailable" behavior but is not supported.
+- **Current state:** the port **translates a manga page on a physical phone.** Both native
+  runtimes are cross-compiled for `aarch64-linux-android` and bundled — libtorch `2.13` with
+  the tch shim, and llama.cpp `b11642` — so detection → OCR → translation → inpainting →
+  typeset runs on device and produces an English page from a Japanese one
+  (see [Building the Android runtimes](#building-the-android-runtimes)).
+  **One defect blocks a chapter: a run over more than a page or two is OOM-killed** — the
+  process reaches ~14 GB and Android kills it. Single pages are correct; multi-page is not.
+  That is the first item in [Next session](#next-session--start-here).
+  Milestones: M0–M3 code landed (platform services, the bundled llama/torch consumer side, the
+  mobile load profile and RAM budgets, the YOLO26s/Manga-OCR/AOT mobile defaults, the
+  `parity`/`bench` harnesses, docs). M4 landed (mobile editor: app bar + Pages/Inspector/
+  Activity sheets, touch gestures, 44 px targets, `share`, 11 locales) and its screenshots are
+  captured. M5 landed the battery-saver profile plus the two runtimes themselves. M6 is
+  configuration: the preview `build` job publishes the debug APK on `android-m*` tags; the
+  signed AAB job is unrun and needs the signing secrets.
+  **Device status** (test phone, Android 16, arm64, 15.6 GB): the full pipeline on one
+  page, import, PNG/CBZ/PSD export, the Keystore credential round trip, the WebGPU probe, the
+  M4 layouts at 360×800 / 412×915 / 800×1280, and the foreground-service fix are all verified.
+  **Not verified:** a multi-page chapter (blocked by the OOM defect), the M2/M3
+  benchmark/parity numbers, BYOK remote providers, and the M6 release path.
+  The port targets Android and desktop; a non-Android mobile build still compiles with the
+  pre-M1 "picker unavailable" behavior but is not supported.
 
 ## How to use this document
 
@@ -39,8 +43,8 @@ what "done" means.
 | 4 | M3 | [M3](#m3--libtorch-full-pipeline) |
 | 5 | M4 | [M4](#m4--touch-ui) |
 | 6 | M5–M6 | [M5](#m5--perf-thermal-device-matrix), [M6](#m6--release) |
-| 7 | Native runtimes + device pass | [Next session](#next-session--start-here), [Debugging on a device](#debugging-on-a-device) |
-| 8 (next) | Native runtimes + device pass | [Next session](#next-session--start-here) |
+| 7 | Native runtimes + device pass | [Building the Android runtimes](#building-the-android-runtimes), [Debugging on a device](#debugging-on-a-device) |
+| 8 (next) | Multi-page memory + numbers | [Next session](#next-session--start-here) |
 
 Rules that apply to every session:
 
@@ -99,7 +103,10 @@ Rules that apply to every session:
 > +1.35 GB, translation +3.94 GB (including the projector, now only loaded when Vision is on),
 > inpainting +0.
 
-1. **Publish the runtime tarball.** The preview job now looks for
+1. **Fix the multi-page memory defect** (blockquote above). This is the only thing standing
+   between the port and its goal: a chapter cannot run until the footprint stops growing per
+   page. Bisect it by stage across pages, or profile it with `heapprofd`.
+2. **Publish the runtime tarball.** The preview job looks for
    `android-runtimes/android-runtimes-arm64-v8a.tar.gz` on this repository's releases and
    extracts it into `jniLibs` (falling back to an app shell with a notice when it is absent).
    The tarball is built and sitting at `/tmp/android-runtimes-arm64-v8a.tar.gz` (74.5 MB
@@ -109,17 +116,18 @@ Rules that apply to every session:
    then re-tag a preview. Until then `android-m5-preview`'s APK installs and boots but stops
    at detection with `<model> needs the Torch runtime…`. Building them on a hosted runner is
    not realistic — the PyTorch cross-build needs `ubuntu-latest-xl`.
-2. **Scale to a chapter.** Only single pages have run. Process a whole CBZ unattended and
-   watch for OOM kills, thermal throttling and the memory policy's eviction behaviour; that is
-   the M3 exit criterion.
-3. **M2/M3 numbers:** run `bench` and `parity` on the phone and fill
+3. **Scale to a chapter.** Once (1) is fixed, process a whole CBZ unattended and watch for OOM
+   kills, thermal throttling and the memory policy's eviction behaviour; that is the M3 exit
+   criterion.
+4. **M2/M3 numbers:** run `bench` and `parity` on the phone and fill
    `packages/docs/hardware.mdx` (en/ja/zh). KleidiAI does not accelerate the Q2_K_XL quant
    (`no kernel for tensor type tq2_0`), so a Q4 quant is the interesting comparison.
-4. **Packaging:** the universal debug APK is 842 MB with the runtimes. Strip the runtime
-   libraries and split by ABI, or move to an AAB feature module / Play asset delivery.
-5. **Unverified on device:** BYOK remote providers, a PSD/CBZ round trip through the picker
-   with the screen off, and import of a real CBZ/RAR.
-6. **M6 landing:** the signed AAB job needs `ANDROID_KEYSTORE_BASE64`,
+5. **Packaging:** the universal debug APK is 842 MB with the runtimes. Strip the runtime
+   libraries and split by ABI, or move them to an AAB feature module / Play asset delivery.
+6. **Unverified on device:** BYOK remote providers, a long job with the screen off (the
+   pipeline loads every stage now, so this is only blocked by (1)), and import of a real
+   CBZ/RAR.
+7. **M6 landing:** the signed AAB job needs `ANDROID_KEYSTORE_BASE64`,
    `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, `SENTRY_AUTH_TOKEN`
    secrets and the `SENTRY_ORG` variable, then `gh workflow run android.yml --ref <version-tag>`
    (the `release-pr.yml` dispatch already exists); then open the upstream issue and split the
@@ -160,6 +168,9 @@ Rules that apply to every session:
 
 ### Needs an adapter
 
+The gaps recorded below are the pre-port survey, kept because they explain why each area was
+touched. M0–M4 closed them; the per-area notes record what the port changed.
+
 | Area | Path | Why |
 |---|---|---|
 | Window chrome / layout | `packages/koharu/components/app/WindowChrome.tsx`, `TitleBar.tsx`, `KoharuApp.tsx` | Desktop menus, window buttons, drag region, resize handles. |
@@ -180,7 +191,7 @@ Rules that apply to every session:
 |---|---|---|
 | CEF runtime | `crates/koharu/src/main.rs` (`#[tauri_runtime_cef::cef_entry_point]`), `crates/koharu-app/src/app.rs` (`Builder::<CefRuntime>`, `Context<CefRuntime>`), 6 command modules, `tauri.conf.json` desktop window. | Resolved in M0 |
 | ML init is fatal | `app.rs` `initialize()` calls `koharu_ml::init()` and `Pipeline::load` with `.expect(...)`; frontend waits on `Initialization` and stays on the startup spinner. | Resolved in M0 |
-| No Android hardware probe | `crates/koharu-runtime/src/hardware/mod.rs:26-43` probes only macOS/Linux/Windows; `Runtime::discover` then `bail!("no device supports the requested runtime features")` (`runtime/mod.rs:70`). | Open |
+| No Android hardware probe | `crates/koharu-runtime/src/hardware/mod.rs:26-43` probes only macOS/Linux/Windows; `Runtime::discover` then `bail!("no device supports the requested runtime features")` (`runtime/mod.rs:70`). | Resolved in M2: the Android probe exposes a CPU device with the RAM class from `/proc/meminfo`, plus a Vulkan device only when `[runtime] android_vulkan` is set |
 | No Android native packages | `runtime/packages/{llama,torch,diffusion}.rs` publish only Windows/Linux/macOS assets. No CPU llama package exists at all. | Resolved in M5 by building both locally — see [Building the Android runtimes](#building-the-android-runtimes). `Diffusion` still has no Android package, so FLUX/RORem inpainting is unavailable there |
 | No Android secret store | `crates/koharu-secrets/src/lib.rs:59-105` uses `keyring` (apple/linux-keyutils/windows), loaded during `Preferences::load()` on `subscribe`. | Resolved in M0 |
 | `rfd` dialogs | `crates/koharu-app/src/commands/lifecycle.rs:351`, `commands/output.rs:58`, `crates/koharu/src/panic.rs:25`. | Resolved in M0 |
@@ -359,19 +370,19 @@ supported on Adreno; no native SurfaceView or CPU-composited fallback is needed.
 **Exit criteria:** import a CBZ, open the project, export a PNG, save an API key, run a long
 job with the screen off. Verified on the phone: import (a JPG through the system picker),
 open, PNG export through the tree picker, CBZ export through create-document (a valid ZIP
-containing `0001_<page label>.png`), and the BYOK credential round trip. Left: a CBZ/RAR
-import, PSD export, and the long job with the screen off — the last one needs the native
-runtimes, because every stage currently fails its load.
+containing `0001_<page label>.png`), PSD export through the tree picker (7.4 MB, same page),
+and the BYOK credential round trip. Left: a CBZ/RAR import, and a long job with the screen
+off — the pipeline now loads every stage, so that one is no longer blocked on runtimes, only
+on the multi-page defect above.
 
 Device progress: import is verified — a real manga JPG imported through the system picker into
-a new project. Export is verified — a PNG came out through the system tree picker at full
-resolution. The Keystore-backed credential store is verified — a provider credential persisted
-across a WebView reload (shown as `Configured`, never echoed back) and cleared again from the
-settings page. The foreground-service crash that a fast-failing job triggered is fixed (see the
-risk register). Remaining: PSD/CBZ export and the long job with the screen off, which needs a
-stage that can actually load (the native runtimes). The import picker on the phone is the M1
-implementation, not the M0 stub; the earlier "importing files is not supported" report came
-from the M0 preview.
+a new project. Export is verified for all three codecs: PNG and PSD through the system tree
+picker at full resolution, CBZ through create-document. The Keystore-backed credential store is
+verified — a provider credential persisted across a WebView reload (shown as `Configured`,
+never echoed back) and cleared again from the settings page. The foreground-service crash that a
+fast-failing job triggered is fixed (see the risk register). The import picker on the phone is
+the M1 implementation, not the M0 stub; the earlier "importing files is not supported" report
+came from the M0 preview.
 
 **Risk spike:** resolved. `tauri-plugin-dialog` on Android returns opaque `content://` URIs
 and cannot pick a directory, which the PNG/PSD export needs. The plugin also rejects on
@@ -384,14 +395,14 @@ multi-select document import, document-tree export, and create-document export.
 
 **Goal:** offline translation with Gemma 4 E4B, measured.
 
-- [ ] Publish `aarch64-linux-android` `libllama`/`libmtmd` from `koharu-rs/llama`
-      (NDK r27c, API 31, `GGML_OPENMP=OFF`, `GGML_LLAMAFILE=OFF`, KleidiAI on,
-      `-Wl,-z,max-page-size=16384` for Play's 16 KB page rule)
-      — external to this repository; the consumer side assumes both libraries are in the
-      APK's `jniLibs`. Re-checked 2026-10-22: `koharu-rs/llama` publishes only
-      windows/linux/macos assets (latest `b11786`), so the Android asset does not exist yet.
-      This repository cannot produce it — `crates/koharu-llama-sys` vendors headers only
-      (`include/*.h`), with no llama.cpp sources.
+- [x] `aarch64-linux-android` `libllama`/`libmtmd` bundled in the APK, cross-compiled locally
+      on 2026-10-22 (NDK r27c, API 31, `GGML_OPENMP=OFF`, `GGML_LLAMAFILE=OFF`, KleidiAI on,
+      16 KB-aligned; `libllama` 55 MB + `libmtmd` 21 MB) — recipe in
+      [Building the Android runtimes](#building-the-android-runtimes).
+      `koharu-rs/llama` still publishes only windows/linux/macos assets (latest `b11786`), so
+      there is no official Android asset to consume; the local build is pinned to upstream tag
+      `b11642`, whose `llama.h`/`ggml.h` are byte-identical to `koharu-llama-sys/include`, so
+      the version is not a free choice.
 - [x] `Bundled` package source in `koharu-runtime`; Android arms in `Llama::discover` and
       `library_names()`
 - [x] Android hardware probe: CPU device always; Vulkan behind a setting, off by default
@@ -414,7 +425,10 @@ multi-select document import, document-tree export, and create-document export.
       table template; the numbers need the reference devices
 
 **Exit criteria:** a page translated fully on-device in airplane mode, with recorded numbers
-and no OOM.
+and no OOM. A page translates correctly on-device (verified 2026-10-22, local models only);
+airplane mode and the recorded numbers are still open. On this phone KleidiAI does nothing for
+the Q2_K_XL quant (`no kernel for tensor type tq2_0, not accelerated by KleidiAI`), so the
+`bench` comparison should use a Q4 quant.
 
 ---
 
@@ -440,28 +454,25 @@ and no OOM.
 - [x] OCR defaults: MangaOCR on mobile, PaddleOCR-VL on desktop (reuses the llama runtime, no
       torch). Per-page language selection is not implemented; the mobile default assumes the
       Japanese manga target.
-- [ ] Cross-compile torch 2.13 (`libtorch_cpu.so`) + `libkoharu-torch.so` for
-      `aarch64-linux-android`; publish to `koharu-rs/torch`; bundle via jniLibs or an AAB
-      feature module
-      — external to this repository; the consumer side is done and `cargo ndk check -p koharu`
-      is green. The APK needs both libraries in `jniLibs` before a device run. The `android`
-      props in `runtime/packages/torch.rs` were verified on 2026-10-22 against `readelf -d` of
-      the published `v2.13.0.7` Linux CPU asset: the set is correct **provided the Android
-      build passes `-DUSE_OPENMP=OFF`**. Otherwise `libtorch_cpu.so` and
-      `libtorch_global_deps.so` need an OpenMP runtime, which on the NDK is `libomp.so` (not a
-      platform library), so it would have to be bundled into `jniLibs` and added to the props.
-      `libtorch_global_deps.so` is a dlopen root only — nothing `DT_NEEDED`s it, but upstream
-      builds it unconditionally, so it stays in the props. `crates/koharu-torch-sys` vendors
-      the shim headers only, so `libkoharu-torch.so` cannot be produced here either.
-      Re-checked 2026-10-22: `koharu-rs/torch` publishes no Android asset.
+- [x] Cross-compile torch 2.13 (`libtorch_cpu.so`) + `libkoharu-torch.so` for
+      `aarch64-linux-android` and bundle them (`libtorch_cpu.so` 215 MB, `libc10.so`,
+      `libtorch.so`, `libtorch_global_deps.so`, shim 18 MB / 2734 exported `at_*`/`atg_*`
+      symbols, all 16 KB-aligned). `koharu-rs/torch` publishes no Android asset and a hosted
+      runner is too small for the PyTorch build, so this is a local cross-compile with five
+      source patches — full recipe and rationale in
+      [Building the Android runtimes](#building-the-android-runtimes). The `android` props in
+      `runtime/packages/torch.rs` match the result exactly: no OpenMP runtime is needed
+      because the build passes `-DUSE_OPENMP=OFF`.
 - [ ] Parity check: 5-page set, desktop vs Android → boxes, masks, OCR text, translations;
       record diffs
       — the `koharu-pipeline` `parity` bin landed (JSON report); the two reports need the
       reference device
 
 **Exit criteria:** a chapter processes unattended with no OOM kills and a parity report is
-attached to the milestone. Open: the external `koharu-rs/torch` asset, a physical-device run,
-and the recorded parity/benchmark numbers.
+attached to the milestone. Verified: detection, OCR, translation and inpainting all load and
+run on a physical phone, and a single page produces a correct typeset translation. Blocked:
+the chapter run by the multi-page OOM (see [Next session](#next-session--start-here)), and the
+parity/benchmark numbers.
 
 ---
 
@@ -499,10 +510,10 @@ a keyboard, mouse, or hover.
 
 Device progress: import, the mobile shell (app bar + Pages/Inspector/Activity sheets), the
 canvas render, the Activity sheet's failure surface, and the layout at 360×800 / 412×915 /
-800×1280 are verified on the phone. The edit → typeset → export pass is partly verified: a
-full-resolution PNG export (1126 × 1600, named `0001_<page label>.png`) landed in
-`Documents/Test/` through the SAF tree picker. **Typeset needs translation output, so it stays
-blocked on the native runtimes.**
+800×1280 are verified on the phone. The edit → typeset → export pass is verified for a single
+page: the pipeline produced a translated, typeset page and a full-resolution PNG
+(1126 × 1600, `0001_<page label>.png`) landed in `Documents/Test/` through the SAF tree
+picker. A multi-page pass is blocked by the memory defect below.
 
 ---
 
@@ -510,6 +521,10 @@ blocked on the native runtimes.**
 
 - [ ] Reference devices: 8 GB mid-range, 12 GB flagship, 6 GB floor
 - [ ] Sustained 10-page run: thermal throttling, LMK behavior, battery drain
+      — the phone already demonstrates the LMK half of this: a 3-page run reaches ~14 GB and
+      is killed. Fix that first (see [Next session](#next-session--start-here)); the per-stage
+      footprint measured so far is detection +80 MB, OCR +1.35 GB, translation +3.94 GB
+      (E4B Q2_K_XL plus the projector), inpainting +0, from a 326 MB baseline.
 - [x] Battery-saver profile (fewer threads, smaller quant, lower concurrency)
       (`koharu-ml` `LoadProfile::power_saver` halves decode/prompt threads and
       batch/ubatch and trims the resident budget 25%; opt in with `[runtime]
@@ -531,6 +546,12 @@ blocked on the native runtimes.**
       keystore password/alias/password were scoped to the "configure signing" step's `env:`
       only, so the later Gradle build step saw them empty — all four keys now go to
       `$GITHUB_ENV`)
+- [x] The preview job bundles the native runtimes when they are published: it looks for
+      `android-runtimes/android-runtimes-arm64-v8a.tar.gz` on this repository's releases and
+      extracts it into `jniLibs` after `tauri android init`, falling back to an app shell with
+      a notice when the asset is absent (2026-10-22). Nothing about the runtimes is in git —
+      they are ~320 MB of prebuilt libraries and the repository's rule is that they come from
+      prebuilt packages. See [Next session](#next-session--start-here) item 2 for the upload.
 - [ ] Play internal track, arm64 ABI split, native symbol upload (`.github/sentry.sh` has no
       Android branch)
       — ABI split and the sentry Android branch landed; the Play internal-track upload is
@@ -545,9 +566,10 @@ blocked on the native runtimes.**
 | Risk | Impact | Mitigation | Where |
 |---|---|---|---|
 | WebGPU missing in Android **WebView**, or `UNRESTRICTED_EXTERNAL_TEXTURE_COPIES` absent | Canvas unusable | Resolved 2026-10-22 on hardware (Adreno 8xx): adapter present, `create_canvas` succeeds and renders, so the downlevel flag is there. No native SurfaceView present path or CPU-composited fallback needed | M0/closed |
-| libtorch Android build, size, or operator coverage | M3 slips | Timebox a build spike first; fall back to an AAB feature module; selective-ops build only if size forces it | M3 |
-| Gemma 4 E4B memory on 8 GB | OOM | RAM-class profiles, text-only translation, E2B below 8 GB | M2 |
-| Sustained decode speed | Poor UX | Queue + foreground service, per-page progress, fast profile (Qwen 3.5 0.8B) | M2/M4 |
+| **A run over more than a page or two is OOM-killed** | A chapter cannot be translated; only single pages work | **Open.** PSS grows ~2 GB per 10 s and reaches ~14 GB on a 3-page run; `smaps` attributes 96% of it to `[anon:scudo:secondary]` as live allocations. Cache knobs (`M_DECAY_TIME=0`, `M_PURGE`), loaded models, the eviction policy and config-driven runner rebuilds are all ruled out — see [Next session](#next-session--start-here) | Open |
+| libtorch Android build, size, or operator coverage | M3 slips | Resolved 2026-10-22: libtorch 2.13 and the tch shim cross-compile and load on device (five PyTorch patches — see [Building the Android runtimes](#building-the-android-runtimes)). The leftover is *packaging*: the universal debug APK is 842 MB with the runtimes, so it needs stripping and an ABI split or an AAB feature module | M5/M6 |
+| Gemma 4 E4B memory on 8 GB | OOM | RAM-class profiles, text-only translation, E2B below 8 GB. Measured on the 15.6 GB test phone: translation alone is +3.94 GB resident | M2 |
+| Sustained decode speed | Poor UX | Queue + foreground service, per-page progress, fast profile (Qwen 3.5 0.8B). KleidiAI does not accelerate Q2_K_XL, so quant choice matters more than the kernel build here | M2/M4 |
 | SAF URI handling via plugin | Import/export broken | Resolved in M1: `tauri-plugin-dialog` returns `content://` URIs and cannot pick a directory, so `koharu-android` owns one SAF surface (import, tree export, create-document) and stages copies in app cache | M1 |
 | Play policy on bundled native runtimes | Distribution | Bundle `.so` only; never download executable code | M0/M6 |
 | Detection model contract mismatch | Pipeline quality | Two-way spike with parity comparison | M3 |
@@ -797,8 +819,13 @@ dev server over the network, set `TAURI_DEV_HOST` to the host LAN address instea
 - Detection: wiring landed for all three detectors; the mobile default is YOLO26s. The final
   quality-vs-latency pick still needs the reference-device numbers (M2/M5).
 - Whether to ship Vulkan at all on Android, or CPU-only for v1 (decided in M2 benchmarks).
-- APK size budget if libtorch cannot be trimmed: AAB feature module vs. Play asset delivery.
-  Still open until the `koharu-rs/torch` Android asset exists.
+- **What holds ~6.4 GB of live native memory during a multi-page run?** Everything else about
+  the pipeline is accounted for; this is the one open defect that blocks a chapter. Best
+  next move is to bisect by stage across pages rather than read code — see
+  [Next session](#next-session--start-here).
+- APK size budget: 842 MB universal debug APK with the runtimes. Strip the runtime libraries,
+  split by ABI, or move them to an AAB feature module / Play asset delivery. The runtime
+  tarball route is already wired into the preview job.
 - OCR language selection: the mobile default is Manga OCR (Japanese). Auto-selecting
   MangaOCR vs. PaddleOCR-VL GGUF per page language is not implemented.
 - A missing bundled runtime: resolved 2026-10-22. A stage whose runtime did not activate now
@@ -835,3 +862,4 @@ and what the next session should pick up.
 | 2026-10-22 | M4 device verification + release | Installed the preview on a physical phone (Android 16, arm64, minSdk 31) and drove the whole flow over adb + WebView CDP: create a project, import a real manga JPG through the system picker, pick a model, Run. The import picker works (the M0 stub is gone), and after the download fix the model files land — `config.json` (353 B) and `model.safetensors` (44 MB) in `runtime/hugging-face/models/mayocream--comic-layout-yolo26s/snapshots/<rev>/`, with `store: staged ok=true`. The run then stalls at the detection load because the bundled runtimes are absent (`Torch android-cpu` / `llama android-cpu` failed to activate) and no job failure is recorded — see [Open questions](#open-questions). Committed `c2c60237`, pushed, tagged `android-m4-preview-2`; CI green; the prerelease carries `app-universal-debug.apk`. Added a [Debugging on a device](#debugging-on-a-device) section (adb-over-TCP, the app log file, WebView CDP, the store layout, and the standalone-probe recipe). | Bundle `koharu-rs/{llama,torch}` into `jniLibs`, re-run the pipeline on the phone, decide hang-vs-error for a missing runtime, then the M4 screenshots and the M1 exit criteria |
 | 2026-10-22 | Failure mode + native-runtime prep + device pass | Fixed the missing-runtime stall. `koharu-ml` now exposes `features()` (set from `runtime.features()` inside `init`), and `koharu-pipeline` guards each stage load with `require_runtime(model, feature)` so a stage whose runtime did not activate fails with `<model> needs the <feature> runtime, which is not available on this device` before the lazy `-sys` loader can `panic!`; `processing.rs` wraps `pipeline.execute` in `catch_unwind` so a residual panic still releases the stop token and publishes a terminal `Failed` job. Found and fixed a second app-killing bug on the device: work that finishes within milliseconds crashed the process with `ForegroundServiceDidNotStartInTimeException`, because `Guard::drop` sent Stop while `startForegroundService` was still in flight, tearing the service down before `onStartCommand` reached `startForeground`. `ForegroundService` now hands the stop to the service and applies it only after it is foregrounded (`startPending`/`stopPending`, and every intent is foregrounded before its action is interpreted). Native runtimes: reconciled the `android` props against `readelf -d` of the published Linux `v2.13.0.7` CPU asset (`libtorch_cpu.so` needs `libc10` + an OpenMP runtime; the NDK's is `libomp.so`, so the Android build must pass `-DUSE_OPENMP=OFF`; `libtorch_global_deps.so` is a dlopen root only). `graph.rs` now logs the full cause chain, `Torch::activate` names the library that failed, and `scripts/bundle-android-runtimes.sh` copies the seven libraries into `jniLibs`. M6: the release job's keystore password/alias/password were scoped to the "configure signing" step, so Gradle saw them empty — all four keys now go to `$GITHUB_ENV`. Also fixed the pre-existing `clippy::double_must_use` error in `koharu-runtime::lib.rs` that kept `cargo clippy --workspace -- -D warnings` red. Verified: `cargo fmt -- --check`, `cargo clippy --workspace -- -D warnings`, `cargo ndk -t arm64-v8a check -p koharu`, `cargo test -p koharu-pipeline --lib` (54 pass), the new `android.yml` parses, `bash -n .github/sentry.sh`. On the phone (test phone, Android 16, arm64, 1060 × 2376): installed the debug APK over the preview, imported project opens, and `Run` now fails fast with the readable error shown in the Activity sheet (`/tmp/shot3.png`) in 5/5 runs with no crash, where 3 of 4 runs previously killed the process. Not verified: no native runtime exists to bundle — `koharu-rs/{torch,llama}` publish no Android asset and this repository vendors headers only — so no stage can load and no M2/M3 numbers exist; the WebGPU probe, export/keys/long-job and the M4 screenshots remain open. Documented two device quirks in [Debugging on a device](#debugging-on-a-device): `adb logcat` is redacted on this phone (use `dumpsys dropbox --print`), and `screencap` needs `-d <display-id>` on the foldable. | Produce the Android runtime assets and run `scripts/bundle-android-runtimes.sh`, then run detection → OCR → translation → inpainting on the phone; capture the M4 screenshots; then the M1 exit criteria |
 | 2026-10-22 | M5 native runtimes + full device pipeline | **The port now runs the whole pipeline on a phone.** Built both runtimes for `aarch64-linux-android` and bundled them: `libllama.so` (55 MB) + `libmtmd.so` (21 MB) from the `koharu-rs/llama` CMake wrapper around upstream llama.cpp tag `b11642` (its headers are byte-identical to `koharu-llama-sys`, so the pin is not optional) plus a local patch adding a `CPU` backend; and PyTorch `v2.13.0` (`libtorch_cpu.so` 215 MB, `libc10.so`, `libtorch.so`, `libtorch_global_deps.so`, all 16 KB-aligned) with the `koharu-rs/torch` shim (`libkoharu-torch.so`, 2734 `at_*`/`atg_*` symbols). Getting libtorch to load took three fixes, all recorded in [Building the Android runtimes](#building-the-android-runtimes): (1) disabling `INTERN_BUILD_MOBILE` pulls in JIT ONNX sources that need ONNX's checker/shape-inference (PyTorch links only `onnx_proto` on Android) and a `at::DynamicLibrary` that compiled to nothing under `C10_MOBILE`; (2) mimalloc forces `-ftls-model=initial-exec`, which bionic refuses in a `dlopen`ed library — `TLS symbol "(null)" … using IE access model`; (3) the global `-fvisibility=hidden` kept `c10::DynamicType::fallback()` out of `libtorch_cpu.so`'s dynamic table, so the shim could not resolve it — checked with an `nm` set-difference rather than one symbol per APK cycle. Six PyTorch patches, one mimalloc patch, one llama-wrapper patch. Also fixed a mobile default: translation fed page images to the LLM by default, costing ~1 GB of projector and 171 s + 44 s of image encode/decode per page on this phone; Android now defaults to text-only unless the user enables Vision, verified by reading the regenerated `config.toml` (`vision = false`) on a wiped config. Verified on the test phone: a full `Run` (detection → manga-ocr → aot-inpainting → Gemma 4 E4B Q2_K_XL → typeset) produced an English page from a Japanese one with zero job failures (`/tmp/final.png`). Published `android-m5-preview` as a prerelease — **its APK does not contain the runtimes** (600 MB, git-ignored, and the preview job runs `tauri android init`), so it stops at detection; the working 842 MB APK is local. | Teach the preview job to fetch the runtimes from a release asset, then run a whole chapter, then the `bench`/`parity` numbers and packaging |
+| 2026-10-22 | Multi-page memory defect | Reported from the phone: a 22-page CBZ "crashes after the first page". `ApplicationExitInfo` shows `reason=3 (LOW_MEMORY)`, so it is the OS killing the app, not a crash. Reproduced deterministically: a 3-page `process` grows PSS 1.50 → 2.78 → 5.03 → 6.84 → 9.63 → 11.79 → 13.80 GB in 80 s and is then killed (device total 15.6 GB); roughly 2 GB per 10 s. **Attribution:** aggregating `/proc/<pid>/smaps` by mapping during the growth shows 96% of the resident set in one mapping — `[anon:scudo:secondary]` at 6.4 GB — so it is live large allocations, not allocator cache. **Ruled out with measurements:** allocator caching (implemented `M_DECAY_TIME=0` + `mallopt(M_PURGE, 0)` at every eviction site, rebuilt, and it changed nothing — 13.8 GB and dead at 80 s — so it was reverted rather than left in with no evidence behind it, and the false root cause was struck from this document); models staying loaded (no GGUF mapping and no runtime-library growth at idle); the eviction policy not running (`MemoryPolicy::for_platform()` is `EvictBetweenStages` on Android and the GGUF really is unmapped afterwards); and a config write rebuilding `StageRunner` mid-run (`savePreferences` only runs from user actions). Per-stage resident set from a 326 MB baseline: detection +80 MB, OCR +1.35 GB, translation +3.94 GB, inpainting +0. Landed while investigating: the page-image projector is only fetched and loaded when the Vision setting is on (it is ~1 GB and was loaded unconditionally), and weights are released when the queue drains on evicting platforms, so an idle phone does not sit on a model. Also added a CI step that extracts a runtime tarball from an `android-runtimes` release into `jniLibs` (published the tarball build to `/tmp/android-runtimes-arm64-v8a.tar.gz`, 74.5 MB) so future `android-m*` tags produce an APK that runs the pipeline. | Bisect the footprint by stage across pages (`/tmp/stage-across.sh`) — detection alone was flat at 0.42 GB for three pages then jumped to 4.26 GB on the fourth — or profile with `heapprofd`; then a chapter run, the `bench`/`parity` numbers, and packaging |
