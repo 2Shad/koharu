@@ -56,27 +56,48 @@ Rules that apply to every session:
 
 ### Next session — start here
 
-> **Multi-page runs used to be OOM-killed; fixed 2026-10-22.** A `process` over more than a
-> page or two grew the resident set until the OS killed the app
-> (`ApplicationExitInfo reason=3 LOW_MEMORY`). Measured on the phone with a 3-page run:
-> PSS 1.46 GB → 3.35 → 5.55 → 7.70 → 9.62 → 11.68 → 13.40 → 14.30 GB in 100 s, then gone
-> (the device has 15.6 GB).
+> **Open defect: a run over more than a page or two is OOM-killed.** The OS kills the app
+> (`ApplicationExitInfo reason=3 LOW_MEMORY`). Measured with a 3-page `process`: PSS 1.50 GB →
+> 2.78 → 5.03 → 6.84 → 9.63 → 11.79 → 13.80 GB in 80 s, then gone (the device has 15.6 GB).
+> Growth is steady at roughly 2 GB per 10 s.
 >
-> The cause was **not** the models staying loaded: `/proc/<pid>/smaps` showed no GGUF mapping
-> and no runtime library growth while the footprint stayed high. Aggregating `smaps` by
-> mapping name pinned it — `[anon:scudo:secondary]` alone was **2.16 GB**. Scudo (bionic's
-> allocator) keeps freed large allocations in a secondary cache instead of returning them to
-> the kernel, so every page's weights were freed into that cache and charged to the process,
-> and the next page pushed it over.
+> **Attribution.** Aggregating `/proc/<pid>/smaps` by mapping name during the growth is
+> unambiguous — 96% of the resident set is one mapping:
 >
-> `koharu_runtime::release_unused_memory()` now calls `mallopt(M_PURGE, 0)` on Android, and
-> the pipeline calls it wherever weights are dropped (`Stages::unload_except` /
-> `unload_all`, which already back the mobile eviction policy and the end-of-queue release).
-> It is a no-op off Android, where the allocator returns memory by itself.
+> ```
+> total Rss: 6651 MB
+>   6400.0 MB  [anon:scudo:secondary]
+> ```
 >
-> Per-stage resident set from a 326 MB baseline, for reference: detection +80 MB, OCR
-> +1.35 GB, translation +3.94 GB (E4B Q2_K_XL 3.22 GB plus the 0.99 GB projector — the
-> projector is now only loaded when the Vision setting is on), inpainting +0.
+> That is Scudo's large-allocation arena, and it is **live** memory rather than cache, because
+> the cache knobs make no difference: setting `M_DECAY_TIME = 0` plus `mallopt(M_PURGE, 0)`
+> (`koharu-runtime/src/memory.rs`, since reverted) changed nothing measurable. So the app
+> really is holding ~6.4 GB of large buffers while it runs.
+>
+> **Ruled out:**
+> - *Models staying loaded.* At idle after a run there is no GGUF mapping and no runtime
+>   library growth, and `[anon:scudo:secondary]` is the only large consumer.
+> - *The mobile eviction policy not running.* `MemoryPolicy::for_platform()` is
+>   `EvictBetweenStages` on Android, and the GGUF really is unmapped afterwards.
+> - *A config change rebuilding `StageRunner` mid-run.* `savePreferences` is only called from
+>   user actions (`SettingsPage`, `InferenceControl`); `receiveJob` just updates the store.
+> - *Allocator caching.* See above.
+>
+> **Where to look next.** The footprint is per-page large allocations, so bisect it rather than
+> reading code: run one stage at a time across N pages and watch `[anon:scudo:secondary]`
+> (`/tmp/stage-across.sh` on the dev host does this). Detection alone was flat at ~0.42 GB for
+> three pages and then jumped to 4.26 GB on the fourth, which points at something that is
+> allocated per page and not released — the prime suspects are the detection stage's
+> full-resolution intermediates (`imageproc` distance transforms and morphology hold several
+> full-page `f32` buffers, ~7 MB each at 1126×1600 but proportional to the page), the per-page
+> `ImageCache`, and prepared frames retained by `koharu_desktop::Desktop` across commits.
+> Failing that, `heapprofd`/Perfetto will attribute the allocations directly.
+>
+> **Practical limit until this is fixed:** one page per run. `Run` defaults to the *selected*
+> pages, and a single page completes correctly, which is how the translated page above was
+> produced. The per-stage resident set from a 326 MB baseline is: detection +80 MB, OCR
+> +1.35 GB, translation +3.94 GB (including the projector, now only loaded when Vision is on),
+> inpainting +0.
 
 1. **Publish the runtime tarball.** The preview job now looks for
    `android-runtimes/android-runtimes-arm64-v8a.tar.gz` on this repository's releases and
