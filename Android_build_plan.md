@@ -56,6 +56,35 @@ Rules that apply to every session:
 
 ### Next session — start here
 
+> **Open defect: multi-page runs are OOM-killed.** A `process` over more than a page or
+> two grows the resident set until the OS kills the app (`ApplicationExitInfo reason=3
+> LOW_MEMORY`). Measured on the HONOR phone with a 3-page run: PSS 1.46 GB → 3.35 → 5.55 →
+> 7.70 → 9.62 → 11.68 → 13.40 → 14.30 GB in 100 s, then the process is gone; the device has
+> 15.6 GB total. Two separate effects are visible:
+>
+> 1. **Steady-state residency ≈ 5.4 GB** for a single page. Per stage, from a 326 MB
+>    baseline: detection +80 MB, OCR +1.35 GB, translation +3.94 GB (E4B Q2_K_XL 3.22 GB
+>    plus the 0.99 GB projector), inpainting +0. A fresh process that has run all four
+>    stages sits at ~5.7 GB.
+> 2. **~4.5 GB of growth per additional page**, which is about one translation model per
+>    page.
+>
+> Unloading does not appear to return memory: switching back to detection after a
+> translation run leaves PSS where it was (−14 MB), and a full run leaves `Native Heap` at
+> 4.74 GB with only 43 MB free. The teardown chain looks correct — `Stages::unload*` →
+> `ModelCell::take` → `Translator::unload` → `LocalTranslator` → `Llm` → `LlamaModel::drop`
+> → `llama_free_model`, with no global cache in `koharu-ml::llm` — so the next step is to
+> distinguish "eviction is not running" from "eviction runs and the allocator retains".
+> A `tracing::debug!` already sits at the eviction site
+> (`stages/mod.rs`, "unloaded model to keep one stage resident"); raise the log level, or log
+> `MemoryPolicy::for_platform()` once at startup, to tell the two apart. If the allocator is
+> the cause, the candidates are PyTorch's mimalloc (`-DUSE_MIMALLOC=OFF`) and llama.cpp's
+> mmap teardown.
+>
+> Until this is fixed, treat a run as single-page. `Run` defaults to the *selected* pages,
+> so the failure only shows up when you select several or widen the scope to the project.
+
+
 The port runs the full pipeline on a phone, and both native runtimes build locally. What
 remains is scale, numbers, and shipping:
 
