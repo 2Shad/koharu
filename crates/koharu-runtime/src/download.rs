@@ -1,7 +1,6 @@
 //! File downloads and progress events.
 
 use std::{
-    future::Future,
     path::Path,
     sync::{
         Arc, LazyLock, OnceLock,
@@ -157,30 +156,6 @@ pub(crate) async fn fetch(url: &str, destination: &Path) -> Result<()> {
         read_timeout,
         max_retries,
     )
-    .await;
-    activity.finish(destination, result).await
-}
-
-pub(crate) async fn receive<F, S, B, E>(name: &str, destination: &Path, source: F) -> Result<()>
-where
-    F: Future<Output = Result<(Option<u64>, S)>>,
-    S: futures::Stream<Item = std::result::Result<B, E>> + Unpin,
-    B: AsRef<[u8]>,
-    E: std::error::Error + Send + Sync + 'static,
-{
-    let read_timeout = Duration::from_secs(network::config()?.read_timeout.max(1));
-    let activity = Activity::start(name.to_owned());
-    let result = async {
-        let (total, stream) = source.await?;
-        write_stream(
-            &activity,
-            destination,
-            total.unwrap_or(0),
-            read_timeout,
-            stream,
-        )
-        .await
-    }
     .await;
     activity.finish(destination, result).await
 }

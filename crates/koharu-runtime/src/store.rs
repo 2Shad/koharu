@@ -113,7 +113,9 @@ impl Store {
             return Ok(target);
         }
 
+        tracing::info!(path = %target.display(), "store: waiting for lock");
         let _guard = Lock::acquire(&target).await?;
+        tracing::info!(path = %target.display(), "store: lock acquired");
         if target.is_file() {
             return Ok(target);
         }
@@ -124,7 +126,10 @@ impl Store {
         let stage = tempfile::NamedTempFile::new_in(parent)
             .with_context(|| format!("failed to stage {}", target.display()))?
             .into_temp_path();
-        install(stage.to_path_buf()).await?;
+        tracing::info!(path = %target.display(), stage = %stage.display(), "store: staging");
+        let installed = install(stage.to_path_buf()).await;
+        tracing::info!(path = %target.display(), ok = installed.is_ok(), "store: staged");
+        installed?;
         ensure!(stage.is_file(), "installer did not create an artifact");
 
         if target.exists() {
