@@ -31,7 +31,12 @@ impl Default for GenerationConfig {
             frequency_penalty: None,
             presence_penalty: None,
             reasoning: Some(false),
-            vision: Some(true),
+            // Feeding page images to the LLM is a desktop default. On a phone the
+            // projector is ~1 GB of the resident set and the CPU spends minutes on
+            // one page's image before the first generated token (measured on an
+            // Adreno/HONOR device: 171 s encode + 44 s decode), so mobile stays
+            // text-only until the user turns Vision on in Translation settings.
+            vision: Some(!cfg!(target_os = "android")),
         }
     }
 }
