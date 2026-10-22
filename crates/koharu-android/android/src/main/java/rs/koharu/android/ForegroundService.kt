@@ -36,7 +36,17 @@ class ForegroundService : Service() {
     @Volatile
     private var instance: ForegroundService? = null
 
+    /** A start was requested and has not reached [onStartCommand] yet. */
+    @Volatile
+    private var startPending = false
+
+    /** A stop arrived while [startPending] and is owed to the service being started. */
+    @Volatile
+    private var stopPending = false
+
     fun start(context: Context, title: String, text: String, done: Long = -1, total: Long = -1) {
+      startPending = true
+      stopPending = false
       val intent = Intent(context, ForegroundService::class.java)
         .setAction(ACTION_START)
         .putExtra(EXTRA_TITLE, title)
@@ -53,12 +63,26 @@ class ForegroundService : Service() {
       return true
     }
 
+    /**
+     * Stops the service once it has been foregrounded.
+     *
+     * Work that finishes within milliseconds (a failed model load, a rejected input) calls this
+     * while the service it started is still being created. Stopping the component then tears it
+     * down before `startForeground` runs, and Android kills the process for missing the
+     * `startForegroundService` deadline; the stop is therefore handed to the service instead.
+     */
     fun stop(context: Context) {
-      context.stopService(Intent(context, ForegroundService::class.java))
+      val service = instance
+      if (service == null) {
+        if (startPending) stopPending = true
+        return
+      }
+      service.stopWhenForegrounded(context)
     }
   }
 
   private var wakeLock: PowerManager.WakeLock? = null
+  private var foregrounded = false
 
   override fun onCreate() {
     super.onCreate()
@@ -68,20 +92,34 @@ class ForegroundService : Service() {
   override fun onBind(intent: Intent?): IBinder? = null
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-    if (intent == null || intent.action == ACTION_STOP) {
+    startPending = false
+    val title = intent?.getStringExtra(EXTRA_TITLE).orEmpty()
+    val text = intent?.getStringExtra(EXTRA_TEXT).orEmpty()
+    val done = intent?.getLongExtra(EXTRA_DONE, -1) ?: -1
+    val total = intent?.getLongExtra(EXTRA_TOTAL, -1) ?: -1
+
+    // Every intent is foregrounded before its action is interpreted: whichever one Android
+    // delivers first is the one its `startForegroundService` deadline is measured against,
+    // including a stop that overtook the start it was paired with.
+    createChannel()
+    startForeground(NOTIFICATION_ID, notification(title, text, done, total))
+    foregrounded = true
+    if (intent == null || intent.action == ACTION_STOP || stopPending) {
+      stopPending = false
       stopSelf(startId)
       return START_NOT_STICKY
     }
 
-    val title = intent.getStringExtra(EXTRA_TITLE).orEmpty()
-    val text = intent.getStringExtra(EXTRA_TEXT).orEmpty()
-    val done = intent.getLongExtra(EXTRA_DONE, -1)
-    val total = intent.getLongExtra(EXTRA_TOTAL, -1)
-
-    createChannel()
-    startForeground(NOTIFICATION_ID, notification(title, text, done, total))
     acquireWakeLock()
     return START_NOT_STICKY
+  }
+
+  private fun stopWhenForegrounded(context: Context) {
+    if (!foregrounded) {
+      stopPending = true
+      return
+    }
+    context.stopService(Intent(context, ForegroundService::class.java))
   }
 
   override fun onDestroy() {
