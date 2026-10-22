@@ -8,21 +8,21 @@ what "done" means.
 - **Baseline:** `main` @ `88d07ef0`, workspace version `0.83.5`, Tauri `3.0.0-alpha.5`
   (git rev `40a2d81d97f5c950e892fa7a6ce8b03064410c4d`), CEF runtime on desktop.
 - **Status date:** 2026-10-22
-- **Current state:** M1 platform services have landed on the `android` branch: the
-  `koharu-android` plugin crate (SAF import/export, share sheet, Keystore, foreground
-  service, back button), the `koharu-app` picker/export abstraction, installable secrets
-  backends, foreground work tracking, and the mobile back-button registry. The Android
-  Rust graph and the debug APK both build. M2 code has landed: a bundled Android llama
-  package, the Android CPU/Vulkan hardware probe, tolerant runtime discovery, the mobile
-  load profile with RAM-class budget checks, the bindgen Android loader arm, and a
-  benchmark harness; `cargo ndk check -p koharu` is green. M3 code has landed: the bundled
-  `Torch::AndroidCpu` runtime, the mobile one-resident-stage memory policy with CPU-lane OOM
-  recovery, PP-DocLayoutV3/YOLO26s wired into the detection contract with platform-aware
-  mobile defaults (YOLO26s detection, Manga OCR, AOT inpainting), and the `koharu-pipeline`
-  `parity` harness. Device verification of the M1–M3 exit criteria (real E4B translation,
-  on-device pipeline, benchmark and parity numbers) and the external `koharu-rs/torch`
-  Android asset are open. The port targets Android and desktop; a non-Android mobile build
-  compiles with the pre-M1 "picker unavailable" behavior but is not supported.
+- **Current state:** the `android` branch carries M0–M6 code; the port is code-complete and
+  the preview APK is published (`android-m4-preview-2`). M0–M3 landed (platform services, the
+  bundled llama/torch consumer side, the mobile load profile and RAM budgets, the
+  YOLO26s/Manga-OCR/AOT mobile defaults, the `parity`/`bench` harnesses, docs). M4 landed: the
+  mobile editor (app bar + Pages/Inspector/Activity bottom sheets, touch gestures, 44 px
+  targets, the `share` command, 11 locales). M5 landed (`[runtime] battery_saver`). M6 landed
+  as configuration: the preview `build` job publishes the debug APK on `android-m*` tags; the
+  signed AAB job is unrun and needs the signing secrets.
+  **Device status:** the preview installs, boots, and **imports a page through the system
+  picker** on a physical phone (Android 16, arm64), and **downloads Hugging Face files**
+  (`config.json` + `model.safetensors` land in the store). The one blocking gap is the
+  external `koharu-rs/{llama,torch}` Android assets: they are not bundled, so a pipeline run
+  stops at the detection load. See [Next session](#next-session--start-here) for the exact
+  handoff. The port targets Android and desktop; a non-Android mobile build still compiles
+  with the pre-M1 "picker unavailable" behavior but is not supported.
 
 ## How to use this document
 
@@ -34,6 +34,7 @@ what "done" means.
 | 4 | M3 | [M3](#m3--libtorch-full-pipeline) |
 | 5 | M4 | [M4](#m4--touch-ui) |
 | 6 | M5–M6 | [M5](#m5--perf-thermal-device-matrix), [M6](#m6--release) |
+| 7 (next) | Native runtimes + device pass | [Next session](#next-session--start-here), [Debugging on a device](#debugging-on-a-device) |
 
 Rules that apply to every session:
 
@@ -46,6 +47,35 @@ Rules that apply to every session:
 - A new platform integration needs an upstream discussion issue before it lands
   (`CONTRIBUTING.md`). The `android` branch is the development vehicle; landing is
   [M6](#m6--release).
+
+### Next session — start here
+
+The port is code-complete through M6; what remains is the external native runtime and the
+device pass. In order:
+
+1. **Bundle the native runtimes — the only thing blocking a working pipeline.** Build
+   `libtorch_cpu.so` + `libkoharu-torch.so` (`koharu-rs/torch`) and `libllama.so` +
+   `libmtmd.so` (`koharu-rs/llama`) for `aarch64-linux-android`, then drop them into
+   `crates/koharu/gen/android/app/src/main/jniLibs/arm64-v8a/`. `tauri android build`
+   copies whatever is in `jniLibs` into the APK; nothing in this repo downloads them. The
+   consumer side is already in place (`Torch::AndroidCpu` / `Llama::AndroidCpu` are bundled
+   packages with bare sonames) — check the published asset's `DT_NEEDED` set against the
+   `android` props in `runtime/packages/{llama,torch}.rs` (currently mirrors the Linux list,
+   without `libgomp`). See [M2](#m2--llamacpp-engine) and [M3](#m3--libtorch-full-pipeline).
+2. **Run the pipeline on the phone.** With the libraries present, run detection → OCR →
+   translation → inpainting on a real page and confirm each stage loads and completes.
+3. **Decide hang vs error for a missing runtime.** The observed run stalled at the detection
+   stage with only `runtime package failed to activate … label=Torch android-cpu`, no job
+   failure, and no further log line. Confirm the pipeline surfaces a readable error instead
+   of hanging, and fix it if it does not — this is the first thing a user hits.
+4. **M4 exit gate:** run import → edit → typeset → export one-handed and capture screenshots
+   at 360×800, 412×915, and 800×1280 (plus a long-label case).
+5. **M1 exit criteria still open:** export PNG/PSD/CBZ through the tree picker, save a BYOK
+   key, and run a long job with the screen off.
+6. **M2/M3 numbers:** run `bench` and `parity` on the reference devices and fill
+   `packages/docs/hardware.mdx` (en/ja/zh).
+7. **M6 landing:** the signed AAB job needs `ANDROID_KEYSTORE_*`/`SENTRY_*`; then open the
+   upstream issue and split the branch into reviewable PRs.
 
 ---
 
@@ -222,8 +252,10 @@ foreground-service requirement.
       stacked mobile layout with safe-area padding; the storage hint and desktop title bar
       are gone on mobile. Assets are served from `http://tauri.localhost/`, no dev server.
 - [x] Desktop `cargo check` passes after the fixes
-- [ ] Install and boot on a physical phone
-- [ ] WebGPU probe on hardware
+- [x] Install and boot on a physical phone (Android 16, arm64; CI preview APK)
+- [ ] WebGPU probe on hardware — the editor canvas rendered an imported page on the phone
+      (no `canvas.unavailable` state, so `koharu-canvas` runs), but the explicit
+      `UNRESTRICTED_EXTERNAL_TEXTURE_COPIES` value was not recorded; still open
 
 **Spike to run in this milestone:** log `navigator.gpu` availability and adapter
 `UNRESTRICTED_EXTERNAL_TEXTURE_COPIES` from the Android WebView. This single result decides
@@ -269,6 +301,11 @@ canvas path; rerun the probe on a physical GPU.
 
 **Exit criteria:** import a CBZ, open the project, export a PNG, save an API key, run a long
 job with the screen off.
+
+Device progress: import is verified — a real manga JPG imported through the system picker into
+a new project. The remaining items (tree export, Keystore key, long job with the screen off)
+are unverified. The import picker on the phone is the M1 implementation, not the M0 stub; the
+earlier "importing files is not supported" report came from the M0 preview.
 
 **Risk spike:** resolved. `tauri-plugin-dialog` on Android returns opaque `content://` URIs
 and cannot pick a directory, which the PNG/PSD export needs. The plugin also rejects on
@@ -375,7 +412,11 @@ and the recorded parity/benchmark numbers.
       Tauri-backed build. This is the remaining M4 exit gate.
 
 **Exit criteria:** a page can be imported, edited, typeset, and exported on a phone without
-a keyboard, mouse, or hover. Code is in place; the on-device pass and screenshots are open.
+a keyboard, mouse, or hover.
+
+Device progress: import, the mobile shell (app bar + Pages/Inspector/Activity sheets), and the
+canvas render on the phone. The edit → typeset → export pass and the screenshots are still
+open.
 
 ---
 
@@ -422,6 +463,8 @@ a keyboard, mouse, or hover. Code is in place; the on-device pass and screenshot
 | Play policy on bundled native runtimes | Distribution | Bundle `.so` only; never download executable code | M0/M6 |
 | Detection model contract mismatch | Pipeline quality | Two-way spike with parity comparison | M3 |
 | `native-tls`/OpenSSL in the NDK build | Build failure | Switch to rustls first | M0 |
+| `rustls-platform-verifier` (reached through `reqwest` and `hf-hub`) on Android | Every Hugging Face download hung with no error | Resolved: `hf-hub` (whose private `no_redirect_client` bypassed the injected TLS config) is dropped; downloads go over the shared client with bundled Mozilla roots via `configure_reqwest_tls` | M4 |
+| Bundled runtime missing at model load | Pipeline stalls instead of erroring | Confirm the pipeline surfaces a readable error and stops the job; the observed detection-stage stall is the symptom to fix | M3 |
 
 ---
 
@@ -436,6 +479,62 @@ From `AGENTS.md`, applied per milestone:
 - Model-port work reports device, input size, baseline, result, and correctness delta.
 - End-to-end tests only when explicitly asked for.
 - PR text stays short: problem, change, verification.
+
+---
+
+## Debugging on a device
+
+The dev host is a QEMU VM with no USB passthrough, so the phone is reached over TCP (run
+`adb tcpip 5555` once over USB from a host that has the phone, then accept the debug prompt):
+
+```sh
+export PATH="$HOME/Android/Sdk/platform-tools:$PATH"
+adb connect <phone-ip>:5555
+```
+
+Local debug APK build (the CI preview additionally sets `CARGO_PROFILE_DEV_DEBUG=0`):
+
+```sh
+export ANDROID_HOME="$HOME/Android/Sdk"
+export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
+export JAVA_HOME="$HOME/.local/opt/jdk-21.0.12.1+1"
+cd crates/koharu
+CARGO_PROFILE_DEV_DEBUG=0 cargo tauri android build --debug --target aarch64 --apk
+adb uninstall rs.koharu.app   # the local APK uses a different debug key than CI
+adb install -d gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+```
+
+Signals to reach for, in order:
+
+- **App log (Rust `tracing`):** `adb exec-out run-as rs.koharu.app cat logs/koharu.log`.
+  `tauri-plugin-log` is configured with `clear_targets()` and a single `LogDir` target, so
+  this file is the only Rust output; `adb logcat` has none. `store:` lines trace the runtime
+  store's lock → stage → publish transitions and are the fastest way to localise a download.
+- **Runtime store:** `adb shell run-as rs.koharu.app ls -R runtime` — files live at
+  `runtime/hugging-face/{models,datasets}/<repo>/snapshots/<revision>/<file>` with a
+  `.<file>.lock` beside each. A `.lock` with no matching file means the download never
+  published.
+- **Frontend / WebView:** debug builds expose the WebView devtools socket. Forward it and
+  drive the page with CDP `Runtime.evaluate`:
+  ```sh
+  PID=$(adb shell pidof rs.koharu.app)
+  adb forward tcp:9222 localabstract:webview_devtools_remote_$PID
+  curl -s http://127.0.0.1:9222/json    # take webSocketDebuggerUrl
+  ```
+  This is how the import + Run flow was driven without touching the screen. Caveat: the page
+  blocks cross-origin `fetch` (CSP/CORS), so it cannot verify the app's own network path;
+  use a probe binary (below) for that.
+- **Standalone probe:** cross-compile a small program that mirrors the app's client
+  configuration and push it, to test the network independently of the app:
+  ```sh
+  cargo ndk -t arm64-v8a --platform 31 build --release
+  adb push target/aarch64-linux-android/release/<bin> /data/local/tmp/
+  adb shell 'chmod 755 /data/local/tmp/<bin> && /data/local/tmp/<bin>'
+  ```
+  Pass `--platform 31` to match the app's `minSdk`; a lower default can fail to link (e.g.
+  `getifaddrs`, which needs API ≥ 24).
+- **Not available:** `debuggerd` and `/proc/locks` need root and production builds reject
+  `adb root`; `/proc/<pid>/task/*/wchan` reads back `0`. Work from the app log and store state.
 
 ---
 
@@ -495,6 +594,12 @@ dev server over the network, set `TAURI_DEV_HOST` to the host LAN address instea
   Still open until the `koharu-rs/torch` Android asset exists.
 - OCR language selection: the mobile default is Manga OCR (Japanese). Auto-selecting
   MangaOCR vs. PaddleOCR-VL GGUF per page language is not implemented.
+- A missing bundled runtime: the pipeline currently stalls at the detection load with only the
+  "runtime package failed to activate" warning. Decide whether it should fail the job with a
+  readable error (preferred) and implement it.
+- Android TLS trust: `configure_reqwest_tls` uses bundled Mozilla roots, so user-installed and
+  corporate CAs are ignored. Revisit only if a user needs them — that would mean initializing
+  `rustls-platform-verifier` over JNI with the `rustls-platform-verifier-android` component.
 
 ---
 
@@ -519,3 +624,4 @@ and what the next session should pick up.
 | 2026-10-22 | M4 + M5 code | M4 touch UI: `CanvasWorkspace` gained a `pointerType === 'touch'` gesture path (8 px slop so a tap cannot paint, long-press selection, pinch-zoom + two-finger pan reusing `clampCameraTranslation`, second/third-pointer guards) and mouse/trackpad is byte-for-byte unchanged; `SelectionControls` handles have 44 px transparent hit boxes with the visual knob unchanged; `ToolBar`/`StatusBar` become a horizontal bottom toolbar and compact bar on mobile. Mobile shell: `Editor` branches on platform (`MobileEditor` = app bar + canvas + bottom sheets), new `MobileAppBar` (Pages/Inspector/Activity toggles plus Import/Export/Share/Undo/Redo/Settings/Close overflow) and `MobileSheets` (Pages/Inspector/Activity as `Sheet side='bottom'`, Android back closes the open sheet), `store.mobilePanel`, `ActivityBody`/`useActivityCount` extracted, `dvh` + a Next `viewport` export with `interactive-widget=resizes-content`, Agent hidden on mobile. Panels: `PageRail`/`Inspector`/preferences get ≥44 px targets, an explicit page multi-select toggle, pointer-based reorder (`elementFromPoint` → `commands.movePage`), always-visible actions and menu rename; desktop Shift/Ctrl/range and HTML5 drag are kept. New `share` typed command in `koharu-app` renders a page to app cache and calls `Android::share`; `packages/bridge/src/protocol.ts` regenerated. Locales: `menu.share`, `menu.more`, `navigator.multiSelect`, `navigator.reorder` added to all 11. M5: `LoadProfile::power_saver` in `koharu-ml` halves decode/prompt threads and batch/ubatch and trims the budget 25%; the `[runtime] battery_saver` key is owned and resolved by `koharu-runtime` (`battery_saver_enabled()`) and applied by the local translator. Off by default; desktop is unchanged. Verified: `tsc --noEmit` clean, oxlint clean (one pre-existing `clamp` warning in `ToolBar.tsx`), focused vitest `editor-components`/`workspace`/`canvas`/`localization` (78 pass), `cargo check -p koharu-app -p koharu-ml -p koharu-translator -p koharu-runtime`, focused `koharu-ml llm::` tests (12 pass), and `cargo ndk -t arm64-v8a check -p koharu` (green; pre-existing VRAM dead-code warnings only). Not verified: no device/emulator run and no screenshots at 360×800/412×915/800×1280. | Run the M4 exit criteria and capture screenshots on the emulator/phone; publish the `koharu-rs/{llama,torch}` Android assets; configure release secrets and run the CI release job |
 | 2026-10-22 | M4/M5/M6 review fixes | Applied the code-review findings. Rust: `cargo fmt` across the workspace (the modified `output.rs`/`lib.rs`/`local/mod.rs` plus three pre-existing unformatted files — `koharu-ml/llm/model.rs`, `koharu-runtime/runtime/packages/llama.rs`, `koharu-translator/bin/bench.rs`) so `cargo fmt -- --check` is green. Frontend: removed the unreachable `platform === 'mobile'` early return in `RightSidebar` (only mounted on desktop), deleted the dead `clamp` helper in `ToolBar`, and spaced the mobile rotate handle + raised corner-handle hit priority in `SelectionControls` so the 44 px boxes stop overlapping on small selections (desktop unchanged). Docs: documented the `[runtime] battery_saver` key in `hardware.mdx` (en/ja/zh) and dropped the outbound "share sheet" mention from the Android import note in `quickstart.mdx` (en/ja/zh). Plan: clarified the M6 CI note to distinguish the preview debug APK from the unrun signed AAB job. Verified: `cargo fmt --check`, `tsc --noEmit`, oxlint, focused vitest (editor-components + workspace), `cargo check`, `cargo ndk -t arm64-v8a check -p koharu`. Note on the earlier "importing files is not supported" report: that string came from the M0 preview, which shipped the `#[cfg(mobile)]` picker stub; M1 replaced it with the SAF `pickImport` implementation (`KoharuPlugin.kt`), so the current build imports through the system picker. | Test the preview APK on a physical phone; capture the M4 screenshots; publish the `koharu-rs/{llama,torch}` assets; configure the release secrets |
 | 2026-10-22 | M4 device fix | Debugged the "download stuck on `config.json`" report on a physical phone (Android 16, arm64). Cause: `reqwest`'s `rustls` backend verifies through `rustls-platform-verifier`, which on Android must be initialized over JNI against the host activity; without that it panics at `android.rs:90` on the first handshake. Because the model download runs in a detached task, the panic unwound the task silently — the `Started` download event had no terminal event, so the activity center showed "downloading config.json" forever and the runtime store kept only a stale `.config.json.lock`. Verified with a standalone on-device probe against the app's exact client config. Fix, two parts. (1) `koharu-runtime::configure_reqwest_tls` builds a `rustls::ClientConfig` from the bundled Mozilla roots (`webpki-roots`) on Android (platform verifier kept on desktop) and is used by `network::http()` and the translator's provider client. (2) `HuggingFaceFile` no longer uses `hf-hub`: `HFClient::build` always creates an internal `no_redirect_client` with default reqwest TLS settings and runs the download probe through it, so it bypasses the caller's configuration and panics on Android regardless of the injected client. Downloads now hit `/{repo}/resolve/{revision}/{file}` (and the `datasets/` variant) over the shared client, and `hf-hub` is dropped from the workspace. Trade-off: Android no longer trusts user-installed CAs. | Verify a full detection/OCR/translation run on the phone; publish the `koharu-rs/{llama,torch}` assets so the stages can load |
+| 2026-10-22 | M4 device verification + release | Installed the preview on a physical phone (Android 16, arm64, minSdk 31) and drove the whole flow over adb + WebView CDP: create a project, import a real manga JPG through the system picker, pick a model, Run. The import picker works (the M0 stub is gone), and after the download fix the model files land — `config.json` (353 B) and `model.safetensors` (44 MB) in `runtime/hugging-face/models/mayocream--comic-layout-yolo26s/snapshots/<rev>/`, with `store: staged ok=true`. The run then stalls at the detection load because the bundled runtimes are absent (`Torch android-cpu` / `llama android-cpu` failed to activate) and no job failure is recorded — see [Open questions](#open-questions). Committed `c2c60237`, pushed, tagged `android-m4-preview-2`; CI green; the prerelease carries `app-universal-debug.apk`. Added a [Debugging on a device](#debugging-on-a-device) section (adb-over-TCP, the app log file, WebView CDP, the store layout, and the standalone-probe recipe). | Bundle `koharu-rs/{llama,torch}` into `jniLibs`, re-run the pipeline on the phone, decide hang-vs-error for a missing runtime, then the M4 screenshots and the M1 exit criteria |
