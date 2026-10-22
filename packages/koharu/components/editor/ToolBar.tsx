@@ -58,13 +58,27 @@ export function ToolBar() {
   const setBrush = useKoharuStore((state) => state.setBrush)
   const shortcuts = useKoharuStore((state) => state.shortcuts)
   const hasBrush = isBrushTool(active)
+  const platform = useKoharuStore((state) => state.platform)
+  const mobile = platform === 'mobile'
 
   return (
-    <aside className='absolute top-3 left-3 z-20 flex w-11 flex-col rounded-2xl border border-border bg-[var(--surface-floating)] p-1 shadow-[var(--shadow-toolrail)]'>
-      <div className='flex flex-col items-center py-0.5'>
+    <aside
+      className={
+        mobile
+          ? 'absolute bottom-3 left-1/2 z-20 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 flex-row items-center overflow-x-auto rounded-2xl border border-border bg-[var(--surface-floating)] p-1 shadow-[var(--shadow-toolrail)]'
+          : 'absolute top-3 left-3 z-20 flex w-11 flex-col rounded-2xl border border-border bg-[var(--surface-floating)] p-1 shadow-[var(--shadow-toolrail)]'
+      }
+    >
+      <div
+        className={
+          mobile ? 'flex flex-row items-center px-0.5' : 'flex flex-col items-center py-0.5'
+        }
+      >
         {tools.map(([tool, Icon], index) => (
           <div key={tool} className='contents'>
-            {index === tools.length - 1 && <span className='my-1 h-px w-5 bg-border' />}
+            {index === tools.length - 1 && (
+              <span className={mobile ? 'mx-1 h-5 w-px bg-border' : 'my-1 h-px w-5 bg-border'} />
+            )}
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -75,14 +89,18 @@ export function ToolBar() {
                     disabled={!page}
                     aria-label={t(`tools.${tool}`)}
                     data-active={active === tool}
-                    className='relative text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-30 data-[active=true]:bg-accent data-[active=true]:text-accent-foreground'
+                    className={
+                      mobile
+                        ? 'relative size-10 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-30 data-[active=true]:bg-accent data-[active=true]:text-accent-foreground'
+                        : 'relative text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-30 data-[active=true]:bg-accent data-[active=true]:text-accent-foreground'
+                    }
                     onClick={() => setTool(tool)}
                   />
                 }
               >
                 <Icon className='size-4' />
               </TooltipTrigger>
-              <TooltipContent side='right'>
+              <TooltipContent side={mobile ? 'top' : 'right'}>
                 {t(`tools.${tool}`)}
                 <span className='ml-2 opacity-60'>{shortcuts[tool].toUpperCase()}</span>
               </TooltipContent>
@@ -92,12 +110,19 @@ export function ToolBar() {
       </div>
 
       {hasBrush && (
-        <div className='flex flex-col items-center gap-1 border-t border-border/80 py-1.5'>
+        <div
+          className={
+            mobile
+              ? 'flex flex-row items-center gap-1 border-l border-border/80 px-1.5 py-0.5'
+              : 'flex flex-col items-center gap-1 border-t border-border/80 py-1.5'
+          }
+        >
           {active === 'draw' && (
             <ColorWell value={brush.color} onChange={(color) => setBrush({ ...brush, color })} />
           )}
           <BrushSize
             value={brush.diameter}
+            mobile={mobile}
             onChange={(diameter) => setBrush({ ...brush, diameter })}
           />
         </div>
@@ -106,7 +131,15 @@ export function ToolBar() {
   )
 }
 
-function BrushSize({ value, onChange }: { value: number; onChange: (value: number) => void }) {
+function BrushSize({
+  value,
+  mobile,
+  onChange,
+}: {
+  value: number
+  mobile: boolean
+  onChange: (value: number) => void
+}) {
   const { t } = useTranslation()
   const roundedValue = Math.round(value)
   const page = usePage().data
@@ -124,7 +157,11 @@ function BrushSize({ value, onChange }: { value: number; onChange: (value: numbe
                   variant='ghost'
                   size='icon'
                   aria-label={t('tools.brushSizePixels', { size: roundedValue })}
-                  className='size-8 rounded-xl font-sans text-[11px] leading-none font-medium tracking-[-0.02em] text-muted-foreground tabular-nums hover:bg-foreground/[0.06] hover:text-foreground'
+                  className={
+                    mobile
+                      ? 'size-10 rounded-xl font-sans text-[11px] leading-none font-medium tracking-[-0.02em] text-muted-foreground tabular-nums hover:bg-foreground/[0.06] hover:text-foreground'
+                      : 'size-8 rounded-xl font-sans text-[11px] leading-none font-medium tracking-[-0.02em] text-muted-foreground tabular-nums hover:bg-foreground/[0.06] hover:text-foreground'
+                  }
                 />
               }
             >
@@ -132,12 +169,12 @@ function BrushSize({ value, onChange }: { value: number; onChange: (value: numbe
             </TooltipTrigger>
           }
         />
-        <TooltipContent side='right'>
+        <TooltipContent side={mobile ? 'top' : 'right'}>
           {t('tools.brushSizeShort', { size: roundedValue })}
         </TooltipContent>
       </Tooltip>
       <PopoverContent
-        side='right'
+        side={mobile ? 'top' : 'right'}
         align='center'
         sideOffset={8}
         className='w-48 gap-2.5 rounded-xl p-2.5'
@@ -170,14 +207,14 @@ function BrushSize({ value, onChange }: { value: number; onChange: (value: numbe
           max={maxSize}
           step={1}
           value={value}
-          className='py-1 [&_[data-slot=slider-thumb]]:size-2.5'
+          className={
+            mobile
+              ? 'py-1 [&_[data-slot=slider-thumb]]:size-4'
+              : 'py-1 [&_[data-slot=slider-thumb]]:size-2.5'
+          }
           onValueChange={onChange}
         />
       </PopoverContent>
     </Popover>
   )
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, Number.isFinite(value) ? value : min))
 }

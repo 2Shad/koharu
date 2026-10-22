@@ -6,6 +6,7 @@ import { HexColorInput, HexColorPicker } from 'react-colorful'
 import { useTranslation } from 'react-i18next'
 
 import { useColorSampling } from '@/components/controls/ColorSampling'
+import { useKoharuStore } from '@/lib/store'
 import { Button } from '@koharu/ui/components/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@koharu/ui/components/popover'
 import { cn } from '@koharu/ui/lib/utils'
@@ -29,6 +30,7 @@ type ColorWellProps = {
 
 export function ColorWell(props: ColorWellProps) {
   const { t } = useTranslation()
+  const mobile = useKoharuStore((state) => state.platform) === 'mobile'
   const { value, label, size = 'default', disabled = false, allowTransparent = false } = props
   const [draft, setDraft] = useState(value ?? '#000000')
   const [transparent, setTransparent] = useState(value === null)
@@ -67,6 +69,7 @@ export function ColorWell(props: ColorWellProps) {
         className={cn(
           'grid place-items-center border border-input bg-background disabled:cursor-not-allowed disabled:opacity-40',
           size === 'sm' ? 'size-6 rounded-md' : 'size-8 rounded-lg',
+          mobile && 'size-11',
         )}
       >
         {transparent ? (
@@ -97,7 +100,10 @@ export function ColorWell(props: ColorWellProps) {
             prefixed
             color={draft}
             aria-label={t('colorPicker.hexCode')}
-            className='h-8 min-w-0 flex-1 rounded-lg border border-input bg-background px-2 font-mono text-[11px] uppercase outline-none focus:border-ring'
+            className={cn(
+              'min-w-0 flex-1 rounded-lg border border-input bg-background px-2 font-mono text-[11px] uppercase outline-none focus:border-ring',
+              mobile ? 'h-11' : 'h-8',
+            )}
             onChange={set}
           />
           {sampling && (
@@ -105,6 +111,7 @@ export function ColorWell(props: ColorWellProps) {
               size='icon'
               variant='outline'
               aria-label={t('colorPicker.sampleCanvas')}
+              className={cn(mobile && 'size-11')}
               onClick={() => {
                 setOpen(false)
                 sampling.request(set)
@@ -119,7 +126,7 @@ export function ColorWell(props: ColorWellProps) {
             type='button'
             size='sm'
             variant={transparent ? 'secondary' : 'ghost'}
-            className='mt-2 w-full justify-start gap-2'
+            className={cn('mt-2 w-full justify-start gap-2', mobile && 'h-11')}
             onClick={clear}
           >
             <SquareSlash aria-hidden='true' className='size-3.5 text-muted-foreground' />

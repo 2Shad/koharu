@@ -254,6 +254,7 @@
     "github": "GitHub",
     "help": "Aide",
     "import": "Importer des pages",
+    "more": "Plus",
     "process": "Traitement",
     "processLayers": "Traiter les calques sélectionnés",
     "processPages": "Traiter les pages sélectionnées",
@@ -262,6 +263,7 @@
     "runPhase": "Lancer : {{phase}}",
     "selectAllLayers": "Sélectionner tous les calques",
     "settings": "Paramètres",
+    "share": "Partager",
     "undo": "Annuler",
     "view": "Affichage"
   },
@@ -293,6 +295,7 @@
     "layerCount": "{{count}} calques",
     "layerCount_one": "{{count}} calque",
     "layerCount_other": "{{count}} calques",
+    "multiSelect": "Sélection multiple",
     "noImage": "Aucune image",
     "noResults": "Aucune page ne correspond à ce filtre.",
     "pageName": "Nom de la page",
@@ -300,6 +303,7 @@
     "rename": "Renommer",
     "renameDescription": "Choisissez un nouveau nom pour cette page.",
     "renameTitle": "Renommer la page",
+    "reorder": "Réorganiser {{page}}",
     "selected": "Sélection : {{count}}"
   },
   "outputPicker": {

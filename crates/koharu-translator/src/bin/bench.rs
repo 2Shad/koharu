@@ -199,7 +199,13 @@ fn peak_rss_kb() -> Option<u64> {
     std::fs::read_to_string("/proc/self/status")
         .ok()?
         .lines()
-        .find_map(|line| line.strip_prefix("VmHWM:")?.split_whitespace().next()?.parse().ok())
+        .find_map(|line| {
+            line.strip_prefix("VmHWM:")?
+                .split_whitespace()
+                .next()?
+                .parse()
+                .ok()
+        })
 }
 
 /// Reads the hottest thermal zone, in degrees Celsius. Not every device exposes one.
@@ -207,7 +213,12 @@ fn thermal_celsius() -> Option<f32> {
     let entries = std::fs::read_dir("/sys/class/thermal").ok()?;
     entries
         .flatten()
-        .filter(|entry| entry.file_name().to_string_lossy().starts_with("thermal_zone"))
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("thermal_zone")
+        })
         .filter_map(|entry| std::fs::read_to_string(entry.path().join("temp")).ok())
         .filter_map(|raw| raw.trim().parse::<i32>().ok())
         .filter(|milli| *milli > 0)

@@ -254,6 +254,7 @@
     "github": "GitHub",
     "help": "帮助",
     "import": "导入页面",
+    "more": "更多",
     "process": "处理",
     "processLayers": "处理拣中个图层",
     "processPages": "处理拣中个页面",
@@ -262,6 +263,7 @@
     "runPhase": "运行{{phase}}",
     "selectAllLayers": "图层侪选",
     "settings": "设置",
+    "share": "分享",
     "undo": "撤销",
     "view": "视图"
   },
@@ -293,6 +295,7 @@
     "layerCount": "{{count}} 个图层",
     "layerCount_one": "{{count}} 个图层",
     "layerCount_other": "{{count}} 个图层",
+    "multiSelect": "多选",
     "noImage": "呒没图像",
     "noResults": "呒没符合箇个筛选条件个页面。",
     "pageName": "页面名称",
@@ -300,6 +303,7 @@
     "rename": "改名",
     "renameDescription": "帮箇页取个新名字。",
     "renameTitle": "页面改名",
+    "reorder": "重排 {{page}}",
     "selected": "拣中个页面：{{count}} 页"
   },
   "outputPicker": {

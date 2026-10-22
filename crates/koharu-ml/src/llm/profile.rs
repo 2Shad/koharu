@@ -107,6 +107,21 @@ impl LoadProfile {
         })
     }
 
+    /// Returns the battery-saver variant of this profile.
+    ///
+    /// Fewer decode threads, a smaller prompt batch, and a more conservative
+    /// resident budget keep the phone in a smaller thermal and power envelope
+    /// at the cost of throughput. Opt-in; the default profile is unchanged.
+    #[must_use]
+    pub fn power_saver(mut self) -> Self {
+        self.n_threads = (self.n_threads / 2).max(1);
+        self.n_threads_batch = (self.n_threads_batch / 2).max(1);
+        self.n_batch = (self.n_batch / 2).max(1);
+        self.n_ubatch = (self.n_ubatch / 2).max(1);
+        self.budget_bytes = self.budget_bytes * 3 / 4;
+        self
+    }
+
     /// Applies the load-time settings to `options`.
     pub fn apply_load_options(&self, options: &mut LoadOptions) {
         options.load_mode = self.load_mode;
@@ -179,7 +194,10 @@ fn performance_core_threads() -> i32 {
         // performance cluster is roughly half the online cores.
         return ((super::model::available_threads() + 1) / 2).max(1);
     };
-    let count = frequencies.into_iter().filter(|value| *value == max).count();
+    let count = frequencies
+        .into_iter()
+        .filter(|value| *value == max)
+        .count();
     i32::try_from(count).unwrap_or(i32::MAX).max(1)
 }
 
@@ -284,5 +302,23 @@ mod tests {
     fn higher_ram_class_has_a_larger_budget() {
         assert!(RamClass::Low.budget_bytes() < RamClass::Mid.budget_bytes());
         assert!(RamClass::Mid.budget_bytes() < RamClass::High.budget_bytes());
+    }
+
+    #[test]
+    fn power_saver_reduces_threads_batch_and_budget() {
+        let normal = LoadProfile {
+            load_mode: LlamaLoadMode::Mmap,
+            n_threads: 8,
+            n_threads_batch: 8,
+            n_batch: 512,
+            n_ubatch: 128,
+            budget_bytes: 4 * GIB,
+        };
+        let saver = normal.power_saver();
+        assert!(saver.n_threads < normal.n_threads);
+        assert!(saver.n_threads_batch < normal.n_threads_batch);
+        assert!(saver.n_batch < normal.n_batch);
+        assert!(saver.n_ubatch < normal.n_ubatch);
+        assert!(saver.budget_bytes < normal.budget_bytes);
     }
 }

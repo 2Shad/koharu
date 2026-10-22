@@ -3,15 +3,23 @@
 import { useQuery } from '@tanstack/react-query'
 import { observeElementRect, useVirtualizer } from '@tanstack/react-virtual'
 import {
+  CheckSquare,
   FilePlus2,
   FolderOpen,
+  GripVertical,
   LoaderCircle,
   MoreHorizontal,
   Search,
   Settings,
   Trash2,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  type PointerEvent as ReactPointerEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { ResourceMonitor } from '@/components/editor/ResourceMonitor'
@@ -66,8 +74,18 @@ interface IntentPrefetchState {
   pages: Set<string>
 }
 
+// Pointer-based reorder state. HTML5 drag events are unreliable on touch, so a
+// finger drags from the handle and the row under the pointer becomes the target.
+interface ReorderState {
+  id: string
+  from: number
+  over: number
+}
+
 export function PageRail() {
   const { t } = useTranslation()
+  const platform = useKoharuStore((state) => state.platform)
+  const mobile = platform === 'mobile'
   const pages = usePages().data ?? emptyPages
   const active = usePage().data?.id ?? null
   const selected = useKoharuStore((state) => state.selectedPages)
@@ -78,7 +96,10 @@ export function PageRail() {
   const anchor = useRef<number | null>(null)
   const selectionRequest = useRef(0)
   const intentPrefetch = useRef<IntentPrefetchState | null>(null)
+  const reorderRef = useRef<ReorderState | null>(null)
   const [dragged, setDragged] = useState<string | null>(null)
+  const [multiSelect, setMultiSelect] = useState(false)
+  const [reorder, setReorder] = useState<ReorderState | null>(null)
   const [query, setQuery] = useState('')
   const [renaming, setRenaming] = useState<PageSummary | null>(null)
   const [renameValue, setRenameValue] = useState('')
@@ -196,6 +217,49 @@ export function PageRail() {
       })
   }
 
+  const updateReorder = (value: ReorderState | null) => {
+    reorderRef.current = value
+    setReorder(value)
+  }
+
+  const startReorder = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    id: string,
+    index: number,
+  ) => {
+    if (!mobile) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    setDragged(id)
+    updateReorder({ id, from: index, over: index })
+  }
+
+  const moveReorder = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const current = reorderRef.current
+    if (!current) return
+    const row = document
+      .elementFromPoint(event.clientX, event.clientY)
+      ?.closest<HTMLElement>('[data-page-index]')
+    const over = row ? Number(row.dataset.pageIndex) : current.over
+    if (!Number.isFinite(over) || over === current.over) return
+    updateReorder({ ...current, over })
+  }
+
+  const endReorder = () => {
+    const current = reorderRef.current
+    updateReorder(null)
+    setDragged(null)
+    if (!current || current.over === current.from) return
+    void call(commands.movePage, current.id, current.over)
+      .then(() => refresh(projectKey, pagesKey))
+      .catch(() => undefined)
+  }
+
+  const cancelReorder = () => {
+    updateReorder(null)
+    setDragged(null)
+  }
+
   const deletePage = (page: string) =>
     void call(commands.deletePages, [page])
       .then(() => {
@@ -231,7 +295,7 @@ export function PageRail() {
   return (
     <>
       <aside className='flex h-full min-h-0 flex-col bg-[var(--surface-sidebar)]'>
-        <header className='flex h-10 shrink-0 items-center px-2.5'>
+        <header className={cn('flex shrink-0 items-center px-2.5', mobile ? 'h-12' : 'h-10')}>
           <div className='flex min-w-0 items-center gap-2'>
             <h2 className='text-[11px] font-semibold'>{t('navigator.pages')}</h2>
             <span className='rounded-full bg-primary/[0.07] px-1.5 py-0.5 text-[9px] text-muted-foreground tabular-nums'>
@@ -249,17 +313,41 @@ export function PageRail() {
               {t('navigator.selected', { count: selected.length })}
             </span>
           )}
+          {mobile && (
+            <Button
+              type='button'
+              variant={multiSelect ? 'secondary' : 'ghost'}
+              size='icon'
+              aria-label={t('navigator.multiSelect')}
+              aria-pressed={multiSelect}
+              className={cn(
+                'size-11 shrink-0 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground',
+                selected.length <= 1 && 'ml-auto',
+              )}
+              onClick={() => setMultiSelect((value) => !value)}
+            >
+              <CheckSquare className='size-4' />
+            </Button>
+          )}
         </header>
 
         {pages.length > 0 && (
           <div className='border-b px-2 py-1.5'>
-            <label className='flex h-6 items-center gap-1.5 rounded-md border border-input bg-background/70 px-1.5'>
+            <label
+              className={cn(
+                'flex items-center gap-1.5 rounded-md border border-input bg-background/70 px-1.5',
+                mobile ? 'h-11' : 'h-6',
+              )}
+            >
               <Search className='size-3 text-muted-foreground' />
               <Input
                 value={query}
                 aria-label={t('navigator.filter')}
                 placeholder={t('navigator.filter')}
-                className='h-5 min-w-0 border-0 bg-transparent p-0 text-[11px] shadow-none focus-visible:ring-0 md:text-[11px]'
+                className={cn(
+                  'min-w-0 border-0 bg-transparent p-0 text-[11px] shadow-none focus-visible:ring-0 md:text-[11px]',
+                  mobile ? 'h-9' : 'h-5',
+                )}
                 onChange={(event) => setQuery(event.currentTarget.value)}
               />
             </label>
@@ -295,20 +383,28 @@ export function PageRail() {
                   <div
                     key={virtualRow.key}
                     data-index={virtualRow.index}
+                    data-page-index={index}
                     className='absolute top-0 left-0 w-full'
                     style={{ transform: `translateY(${virtualRow.start}px)` }}
                   >
                     <PageItem
                       page={page}
+                      mobile={mobile}
+                      multiSelect={multiSelect}
                       active={active === page.id}
                       selected={selected.includes(page.id)}
                       dragged={dragged === page.id}
+                      dropTarget={reorder !== null && reorder.over === index && reorder.id !== page.id}
                       onIntent={active === page.id ? undefined : () => prefetchOnIntent(page.id)}
                       onSelect={(additive, range) => select(index, additive, range)}
                       onDragStart={() => setDragged(page.id)}
                       onDragEnd={() => setDragged(null)}
                       onRename={() => openRename(page)}
                       onDelete={() => deletePage(page.id)}
+                      onReorderStart={(event) => startReorder(event, page.id, index)}
+                      onReorderMove={moveReorder}
+                      onReorderEnd={endReorder}
+                      onReorderCancel={cancelReorder}
                       onDrop={() => {
                         if (dragged && dragged !== page.id) {
                           void call(commands.movePage, dragged, index)
@@ -333,7 +429,10 @@ export function PageRail() {
                   type='button'
                   variant='ghost'
                   size='icon'
-                  className='size-8 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground'
+                  className={cn(
+                    'text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground',
+                    mobile ? 'size-11' : 'size-8',
+                  )}
                   aria-label={t('menu.settings')}
                   onClick={() => setSettingsOpen(true)}
                 />
@@ -394,6 +493,7 @@ function PageImportMenu({
   onImport: (source: PageImportSource) => void
 }) {
   const { t } = useTranslation()
+  const mobile = useKoharuStore((state) => state.platform) === 'mobile'
   const icon = importing ? (
     <LoaderCircle className='size-3.5 animate-spin' />
   ) : (
@@ -409,7 +509,7 @@ function PageImportMenu({
             variant='outline'
             disabled={importing}
             aria-busy={importing}
-            className='rounded-lg text-[10px]'
+            className={cn('rounded-lg text-[10px]', mobile && 'h-11 px-4')}
           />
         }
       >
@@ -422,7 +522,10 @@ function PageImportMenu({
       >
         <DropdownMenuItem
           disabled={importing}
-          className='min-h-7 gap-1 px-1.5 py-0.5 text-[11px] [&_svg:not([class*="size-"])]:size-3.5'
+          className={cn(
+            'gap-1 px-1.5 py-0.5 text-[11px] [&_svg:not([class*="size-"])]:size-3.5',
+            mobile ? 'min-h-11' : 'min-h-7',
+          )}
           onClick={() => onImport('files')}
         >
           <FilePlus2 />
@@ -430,7 +533,10 @@ function PageImportMenu({
         </DropdownMenuItem>
         <DropdownMenuItem
           disabled={importing}
-          className='min-h-7 gap-1 px-1.5 py-0.5 text-[11px] [&_svg:not([class*="size-"])]:size-3.5'
+          className={cn(
+            'gap-1 px-1.5 py-0.5 text-[11px] [&_svg:not([class*="size-"])]:size-3.5',
+            mobile ? 'min-h-11' : 'min-h-7',
+          )}
           onClick={() => onImport('folder')}
         >
           <FolderOpen />
@@ -443,9 +549,12 @@ function PageImportMenu({
 
 function PageItem({
   page,
+  mobile,
+  multiSelect,
   active,
   selected,
   dragged,
+  dropTarget,
   onIntent,
   onSelect,
   onDragStart,
@@ -453,11 +562,18 @@ function PageItem({
   onRename,
   onDelete,
   onDrop,
+  onReorderStart,
+  onReorderMove,
+  onReorderEnd,
+  onReorderCancel,
 }: {
   page: PageSummary
+  mobile: boolean
+  multiSelect: boolean
   active: boolean
   selected: boolean
   dragged: boolean
+  dropTarget: boolean
   onIntent?: () => void
   onSelect: (additive: boolean, range: boolean) => void
   onDragStart: () => void
@@ -465,14 +581,19 @@ function PageItem({
   onRename: () => void
   onDelete: () => void
   onDrop: () => void
+  onReorderStart: (event: ReactPointerEvent<HTMLButtonElement>) => void
+  onReorderMove: (event: ReactPointerEvent<HTMLButtonElement>) => void
+  onReorderEnd: () => void
+  onReorderCancel: () => void
 }) {
   const { t } = useTranslation()
 
   return (
     <article
-      draggable
+      draggable={!mobile}
       data-active={active}
       data-selected={selected}
+      data-drop-target={dropTarget || undefined}
       className={cn(
         'group grid cursor-default grid-cols-[48px_minmax(0,1fr)] gap-2.5 rounded-xl p-1.5 transition-colors select-none',
         active
@@ -481,14 +602,15 @@ function PageItem({
             ? 'bg-foreground/[0.06] hover:bg-foreground/[0.08]'
             : 'hover:bg-foreground/[0.045]',
         dragged && 'opacity-50',
+        dropTarget && 'ring-2 ring-primary/60',
       )}
       onPointerEnter={onIntent}
       onFocus={onIntent}
       onClick={(event) => {
         if ((event.target as HTMLElement).closest('button,[role="menuitem"]')) return
-        onSelect(event.ctrlKey || event.metaKey, event.shiftKey)
+        onSelect(multiSelect || event.ctrlKey || event.metaKey, event.shiftKey)
       }}
-      onDoubleClick={onRename}
+      onDoubleClick={mobile ? undefined : onRename}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onDragOver={(event) => event.preventDefault()}
@@ -507,6 +629,19 @@ function PageItem({
       <div className='min-w-0 py-0.5'>
         <div className='flex items-start gap-1'>
           <span className='min-w-0 flex-1 truncate text-[10px] font-medium'>{page.label}</span>
+          {mobile && (
+            <button
+              type='button'
+              aria-label={t('navigator.reorder', { page: page.label })}
+              className='grid size-11 shrink-0 touch-none place-items-center rounded-md text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground'
+              onPointerDown={onReorderStart}
+              onPointerMove={onReorderMove}
+              onPointerUp={onReorderEnd}
+              onPointerCancel={onReorderCancel}
+            >
+              <GripVertical className='size-4' />
+            </button>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
@@ -514,16 +649,27 @@ function PageItem({
                   variant='ghost'
                   size='icon-xs'
                   aria-label={t('navigator.actionsFor', { page: page.label })}
-                  className='-mt-1 shrink-0 opacity-0 shadow-none group-hover:opacity-100 aria-expanded:opacity-100'
+                  className={cn(
+                    'shrink-0 shadow-none',
+                    mobile
+                      ? 'size-11'
+                      : '-mt-1 opacity-0 group-hover:opacity-100 aria-expanded:opacity-100',
+                  )}
                 />
               }
             >
               <MoreHorizontal />
             </DropdownMenuTrigger>
             <DropdownMenuContent align='end'>
-              <DropdownMenuItem onClick={onRename}>{t('navigator.rename')}</DropdownMenuItem>
+              <DropdownMenuItem className={cn(mobile && 'min-h-11')} onClick={onRename}>
+                {t('navigator.rename')}
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem variant='destructive' onClick={onDelete}>
+              <DropdownMenuItem
+                variant='destructive'
+                className={cn(mobile && 'min-h-11')}
+                onClick={onDelete}
+              >
                 <Trash2 /> {t('navigator.delete')}
               </DropdownMenuItem>
             </DropdownMenuContent>

@@ -43,6 +43,10 @@ import { commands, type Frame, type Point, type TransformFrame } from '@koharu/b
 import { Button } from '@koharu/ui/components/button'
 
 const BRUSH_DIAMETER_STEP = 4
+// Touch-only tolerances. Pointer type (not platform) selects the touch path, so a mouse or
+// trackpad on either platform keeps the exact desktop behavior.
+const TOUCH_SLOP = 8
+const LONG_PRESS_MS = 500
 
 const canvasCursors = {
   select: undefined,
@@ -58,6 +62,14 @@ type Gesture =
   | { kind: 'pan'; pointer: number; start: Point; translation: [number, number] }
   | { kind: 'move'; pointer: number; start: Point; originals: TransformFrame[] }
   | { kind: 'text'; pointer: number; start: Point; frame: Frame }
+  | {
+      kind: 'pinch'
+      pointers: [number, number]
+      startDistance: number
+      startZoom: number
+      startMidpoint: Point
+      startTranslation: [number, number]
+    }
   | StrokeGesture
 
 interface StrokeGesture {
@@ -80,11 +92,24 @@ interface StrokeUpdate {
   points: Point[]
 }
 
+// A single-finger touch before it has moved past the slop threshold. Nothing is painted or
+// dragged until this is promoted, so a tap cannot leave a mark.
+interface PendingTouch {
+  pointer: number
+  start: Point
+  physical: Point
+  clientX: number
+  clientY: number
+}
+
 export function CanvasWorkspace() {
   const { t } = useTranslation()
   const surface = useRef<HTMLDivElement>(null)
   const [canvasElement, setCanvasElement] = useState<HTMLCanvasElement | null>(null)
   const gesture = useRef<Gesture | null>(null)
+  const pointers = useRef(new Map<number, { clientX: number; clientY: number }>())
+  const pendingTouch = useRef<PendingTouch | null>(null)
+  const longPress = useRef<number | null>(null)
   const previousPageIndex = useRef<number | null>(null)
   const spaceHeld = useRef(false)
   const transformActive = useRef(false)
@@ -205,6 +230,12 @@ export function CanvasWorkspace() {
   }, [canvas, enqueue, transformUpdates])
 
   const cancelGesture = useCallback(() => {
+    if (longPress.current !== null) {
+      window.clearTimeout(longPress.current)
+      longPress.current = null
+    }
+    pendingTouch.current = null
+    pointers.current.clear()
     const current = gesture.current
     gesture.current = null
     if (current?.kind === 'paint' || current?.kind === 'erase' || current?.kind === 'inpaint') {
@@ -424,6 +455,7 @@ export function CanvasWorkspace() {
     const current = gesture.current
     const sample = samples.at(-1)
     if (!page || !sample) return
+    if (current?.kind === 'pinch') return
     const physical = clientPhysicalPoint(sample.clientX, sample.clientY)
     setCursor(physical)
     if (!current || current.pointer !== pointer) {
@@ -506,35 +538,291 @@ export function CanvasWorkspace() {
       const operation =
         current.kind === 'paint'
           ? enqueue(() =>
-            call(commands.commitPaint, current.revision, current.layer, current.points, {
-              diameter: current.diameter,
-              color: current.color!,
-            }),
-          ).then((result) => {
-            selectLayers([result.layer])
-            return refresh(projectKey, pagesKey, pageKey)
-          })
-          : current.kind === 'erase'
-            ? enqueue(() =>
-              call(
-                commands.commitErase,
-                current.revision,
-                current.layer!,
-                current.points,
-                current.diameter,
-              ),
+              call(commands.commitPaint, current.revision, current.layer, current.points, {
+                diameter: current.diameter,
+                color: current.color!,
+              }),
             ).then((result) => {
               selectLayers([result.layer])
               return refresh(projectKey, pagesKey, pageKey)
             })
+          : current.kind === 'erase'
+            ? enqueue(() =>
+                call(
+                  commands.commitErase,
+                  current.revision,
+                  current.layer!,
+                  current.points,
+                  current.diameter,
+                ),
+              ).then((result) => {
+                selectLayers([result.layer])
+                return refresh(projectKey, pagesKey, pageKey)
+              })
             : enqueue(() =>
-              call(commands.commitInpaint, current.revision, current.points, current.diameter),
-            )
+                call(commands.commitInpaint, current.revision, current.points, current.diameter),
+              )
       commitPending.current = true
       void operation
         .catch(() => canvas?.cancelStroke())
         .finally(() => (commitPending.current = false))
     }
+  }
+
+  const clearLongPress = () => {
+    if (longPress.current !== null) {
+      window.clearTimeout(longPress.current)
+      longPress.current = null
+    }
+  }
+
+  // Shared by mouse input and by a touch once it clears the slop threshold. `point` is always
+  // the gesture origin, so a promoted touch starts exactly where the finger landed.
+  const beginGesture = (
+    pointer: number,
+    point: Point,
+    physical: Point,
+    additive: boolean,
+    middle: boolean,
+  ) => {
+    if (!page || !canvas || canvasRevision === null) return
+    if (middle || tool === 'pan' || spaceHeld.current) {
+      gesture.current = {
+        kind: 'pan',
+        pointer,
+        start: physical,
+        translation: useKoharuStore.getState().camera.translation,
+      }
+      return
+    }
+    if (tool === 'select') {
+      const target = hitTestLayers(page.layers, point, layerFrames)
+      if (!target) {
+        if (!additive) selectLayers([])
+        return
+      }
+      const next = additive
+        ? selected.includes(target.id)
+          ? selected.filter((id) => id !== target.id)
+          : [...selected, target.id]
+        : selected.includes(target.id)
+          ? selected
+          : [target.id]
+      selectLayers(next)
+      if (!next.includes(target.id)) return
+      const originals = framesFor(next)
+      if (!originals.length) return
+      gesture.current = { kind: 'move', pointer, start: point, originals }
+      beginTransform(originals)
+      return
+    }
+    if (tool === 'text') {
+      const frame = draftFrame(point, point)
+      gesture.current = { kind: 'text', pointer, start: point, frame }
+      setDraft(frame)
+      return
+    }
+    if (tool === 'draw') {
+      strokeUpdates.clear()
+      const color = hexToRgba(brush.color)
+      gesture.current = {
+        kind: 'paint',
+        pointer,
+        revision: canvasRevision,
+        layer: activeRaster?.id ?? null,
+        points: [point],
+        diameter: brush.diameter,
+        color,
+      }
+      try {
+        canvas.beginStroke({
+          kind: 'paint',
+          layer: activeRaster?.id ?? null,
+          point,
+          diameter: brush.diameter,
+          color,
+        })
+      } catch (error) {
+        gesture.current = null
+        receiveError(errorMessage(error))
+      }
+      return
+    }
+    if (tool === 'eraser') {
+      if (!activeRaster) {
+        receiveError('Select a paint or cleanup layer before using the Eraser.')
+        return
+      }
+      strokeUpdates.clear()
+      gesture.current = {
+        kind: 'erase',
+        pointer,
+        revision: canvasRevision,
+        layer: activeRaster.id,
+        points: [point],
+        diameter: brush.diameter,
+      }
+      try {
+        canvas.beginStroke({
+          kind: 'erase',
+          layer: activeRaster.id,
+          point,
+          diameter: brush.diameter,
+        })
+      } catch (error) {
+        gesture.current = null
+        receiveError(errorMessage(error))
+      }
+      return
+    }
+    if (tool === 'remove') {
+      strokeUpdates.clear()
+      gesture.current = {
+        kind: 'inpaint',
+        pointer,
+        revision: canvasRevision,
+        layer: null,
+        points: [point],
+        diameter: brush.diameter,
+      }
+      try {
+        canvas.beginStroke({
+          kind: 'inpaint',
+          layer: null,
+          point,
+          diameter: brush.diameter,
+        })
+      } catch (error) {
+        gesture.current = null
+        receiveError(errorMessage(error))
+      }
+      return
+    }
+    if (tool === 'color_picker') {
+      void canvas
+        .sampleColor(physical)
+        .then((color) => {
+          const hex = rgbaToHex(color)
+          if (!colorSampling?.complete(hex)) setBrush({ ...brush, color: hex })
+        })
+        .catch((error: unknown) => receiveError(errorMessage(error)))
+    }
+  }
+
+  const armTouch = (pointer: number, clientX: number, clientY: number) => {
+    clearLongPress()
+    pendingTouch.current = {
+      pointer,
+      start: clientPagePoint(clientX, clientY),
+      physical: clientPhysicalPoint(clientX, clientY),
+      clientX,
+      clientY,
+    }
+    longPress.current = window.setTimeout(() => {
+      longPress.current = null
+      promoteLongPress()
+    }, LONG_PRESS_MS)
+  }
+
+  // Touch has no hover, so a long press is the explicit selection affordance: it selects the
+  // layer under the finger and arms a move, while a plain tap only selects.
+  const promoteLongPress = () => {
+    const pending = pendingTouch.current
+    if (!pending || !page || tool !== 'select') return
+    pendingTouch.current = null
+    const target = hitTestLayers(page.layers, pending.start, layerFrames)
+    if (!target) {
+      selectLayers([])
+      return
+    }
+    selectLayers([target.id])
+    const originals = framesFor([target.id])
+    if (!originals.length) return
+    gesture.current = { kind: 'move', pointer: pending.pointer, start: pending.start, originals }
+    beginTransform(originals)
+  }
+
+  const tapGesture = (pending: PendingTouch) => {
+    if (!page || !canvas) return
+    if (tool === 'select') {
+      const target = hitTestLayers(page.layers, pending.start, layerFrames)
+      selectLayers(target ? [target.id] : [])
+      return
+    }
+    if (tool === 'text') {
+      void call(commands.addPointText, pending.start)
+        .then((result) => {
+          selectLayers([result.layer])
+          return refresh(projectKey, pagesKey, pageKey)
+        })
+        .catch(() => undefined)
+      return
+    }
+    if (tool === 'color_picker') {
+      void canvas
+        .sampleColor(pending.physical)
+        .then((color) => {
+          const hex = rgbaToHex(color)
+          if (!colorSampling?.complete(hex)) setBrush({ ...brush, color: hex })
+        })
+        .catch((error: unknown) => receiveError(errorMessage(error)))
+    }
+  }
+
+  const beginPinch = () => {
+    const entries = [...pointers.current.entries()]
+    cancelGesture()
+    const bounds = surface.current?.getBoundingClientRect()
+    if (entries.length < 2 || !bounds) return
+    for (const [id, position] of entries) pointers.current.set(id, position)
+    const [[firstId, first], [secondId, second]] = entries
+    const dpr = window.devicePixelRatio
+    const camera = useKoharuStore.getState().camera
+    gesture.current = {
+      kind: 'pinch',
+      pointers: [firstId, secondId],
+      startDistance: Math.max(
+        1,
+        Math.hypot(first.clientX - second.clientX, first.clientY - second.clientY),
+      ),
+      startZoom: camera.zoom,
+      startMidpoint: {
+        x: ((first.clientX + second.clientX) * 0.5 - bounds.x) * dpr,
+        y: ((first.clientY + second.clientY) * 0.5 - bounds.y) * dpr,
+      },
+      startTranslation: camera.translation,
+    }
+  }
+
+  const updatePinch = () => {
+    const current = gesture.current
+    if (current?.kind !== 'pinch' || !page) return
+    const bounds = surface.current?.getBoundingClientRect()
+    const first = pointers.current.get(current.pointers[0])
+    const second = pointers.current.get(current.pointers[1])
+    if (!bounds || !first || !second) return
+    const dpr = window.devicePixelRatio
+    const midpoint = {
+      x: ((first.clientX + second.clientX) * 0.5 - bounds.x) * dpr,
+      y: ((first.clientY + second.clientY) * 0.5 - bounds.y) * dpr,
+    }
+    const distance = Math.max(
+      1,
+      Math.hypot(first.clientX - second.clientX, first.clientY - second.clientY),
+    )
+    const zoom = clamp(current.startZoom * (distance / current.startDistance), 0.02, 16)
+    const pageX = (current.startMidpoint.x - current.startTranslation[0]) / current.startZoom
+    const pageY = (current.startMidpoint.y - current.startTranslation[1]) / current.startZoom
+    const translation = clampCameraTranslation(
+      [midpoint.x - pageX * zoom, midpoint.y - pageY * zoom],
+      zoom,
+      pageWidth ?? page.size.width,
+      pageHeight ?? page.size.height,
+      bounds.width * dpr,
+      bounds.height * dpr,
+      dpr,
+    )
+    useKoharuStore.setState({ camera: { zoom, translation, fitted: false } })
   }
 
   return (
@@ -566,133 +854,93 @@ export function CanvasWorkspace() {
               return
             event.currentTarget.focus()
             event.currentTarget.setPointerCapture(event.pointerId)
-            const physical = clientPhysicalPoint(event.clientX, event.clientY)
-            const point = clientPagePoint(event.clientX, event.clientY)
-            setCursor(physical)
 
-            if (event.button === 1 || tool === 'pan' || spaceHeld.current) {
-              gesture.current = {
-                kind: 'pan',
-                pointer: event.pointerId,
-                start: physical,
-                translation: useKoharuStore.getState().camera.translation,
+            // Touch is deferred behind the slop threshold and a pinch can preempt it. Mouse and
+            // pen keep the exact previous behavior.
+            if (event.pointerType === 'touch') {
+              const prior = pointers.current.size
+              pointers.current.set(event.pointerId, {
+                clientX: event.clientX,
+                clientY: event.clientY,
+              })
+              if (prior === 0) {
+                if (gesture.current) {
+                  pointers.current.delete(event.pointerId)
+                  return
+                }
+                armTouch(event.pointerId, event.clientX, event.clientY)
+              } else if (prior === 1) {
+                beginPinch()
               }
-            } else if (tool === 'select') {
-              const target = hitTestLayers(page.layers, point, layerFrames)
-              const additive = event.shiftKey || event.ctrlKey || event.metaKey
-              if (!target) {
-                if (!additive) selectLayers([])
-                return
-              }
-              const next = additive
-                ? selected.includes(target.id)
-                  ? selected.filter((id) => id !== target.id)
-                  : [...selected, target.id]
-                : selected.includes(target.id)
-                  ? selected
-                  : [target.id]
-              selectLayers(next)
-              if (!next.includes(target.id)) return
-              const originals = framesFor(next)
-              if (!originals.length) return
-              gesture.current = { kind: 'move', pointer: event.pointerId, start: point, originals }
-              beginTransform(originals)
-            } else if (tool === 'text') {
-              const frame = draftFrame(point, point)
-              gesture.current = { kind: 'text', pointer: event.pointerId, start: point, frame }
-              setDraft(frame)
-            } else if (tool === 'draw') {
-              strokeUpdates.clear()
-              const color = hexToRgba(brush.color)
-              gesture.current = {
-                kind: 'paint',
-                pointer: event.pointerId,
-                revision: canvasRevision,
-                layer: activeRaster?.id ?? null,
-                points: [point],
-                diameter: brush.diameter,
-                color,
-              }
-              try {
-                canvas.beginStroke({
-                  kind: 'paint',
-                  layer: activeRaster?.id ?? null,
-                  point,
-                  diameter: brush.diameter,
-                  color,
-                })
-              } catch (error) {
-                gesture.current = null
-                receiveError(errorMessage(error))
-              }
-            } else if (tool === 'eraser') {
-              if (!activeRaster) {
-                receiveError('Select a paint or cleanup layer before using the Eraser.')
-                return
-              }
-              strokeUpdates.clear()
-              gesture.current = {
-                kind: 'erase',
-                pointer: event.pointerId,
-                revision: canvasRevision,
-                layer: activeRaster.id,
-                points: [point],
-                diameter: brush.diameter,
-              }
-              try {
-                canvas.beginStroke({
-                  kind: 'erase',
-                  layer: activeRaster.id,
-                  point,
-                  diameter: brush.diameter,
-                })
-              } catch (error) {
-                gesture.current = null
-                receiveError(errorMessage(error))
-              }
-            } else if (tool === 'remove') {
-              strokeUpdates.clear()
-              gesture.current = {
-                kind: 'inpaint',
-                pointer: event.pointerId,
-                revision: canvasRevision,
-                layer: null,
-                points: [point],
-                diameter: brush.diameter,
-              }
-              try {
-                canvas.beginStroke({
-                  kind: 'inpaint',
-                  layer: null,
-                  point,
-                  diameter: brush.diameter,
-                })
-              } catch (error) {
-                gesture.current = null
-                receiveError(errorMessage(error))
-              }
-            } else if (tool === 'color_picker') {
-              void canvas
-                .sampleColor(physical)
-                .then((color) => {
-                  const hex = rgbaToHex(color)
-                  if (!colorSampling?.complete(hex)) setBrush({ ...brush, color: hex })
-                })
-                .catch((error: unknown) => receiveError(errorMessage(error)))
+              event.preventDefault()
+              return
             }
+
+            const physical = clientPhysicalPoint(event.clientX, event.clientY)
+            setCursor(physical)
+            beginGesture(
+              event.pointerId,
+              clientPagePoint(event.clientX, event.clientY),
+              physical,
+              event.shiftKey || event.ctrlKey || event.metaKey,
+              event.button === 1,
+            )
             event.preventDefault()
           }}
           onPointerMove={(event) => {
             if (!page) return
+            if (event.pointerType === 'touch') {
+              if (!pointers.current.has(event.pointerId)) return
+              pointers.current.set(event.pointerId, {
+                clientX: event.clientX,
+                clientY: event.clientY,
+              })
+              if (gesture.current?.kind === 'pinch') {
+                updatePinch()
+                return
+              }
+              const pending = pendingTouch.current
+              if (pending && pending.pointer === event.pointerId) {
+                if (
+                  Math.hypot(event.clientX - pending.clientX, event.clientY - pending.clientY) >
+                  TOUCH_SLOP
+                ) {
+                  clearLongPress()
+                  pendingTouch.current = null
+                  beginGesture(pending.pointer, pending.start, pending.physical, false, false)
+                  moveGesture(event.pointerId, [{ clientX: event.clientX, clientY: event.clientY }])
+                }
+                return
+              }
+            }
             const coalesced = event.nativeEvent.getCoalescedEvents?.() ?? [event.nativeEvent]
             moveGesture(event.pointerId, coalesced.length ? coalesced : [event.nativeEvent])
           }}
           onPointerUp={(event) => {
+            const release = () => {
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                event.currentTarget.releasePointerCapture(event.pointerId)
+              }
+            }
+            if (event.pointerType === 'touch') {
+              pointers.current.delete(event.pointerId)
+              if (gesture.current?.kind === 'pinch') {
+                if (pointers.current.size < 2) gesture.current = null
+                release()
+                return
+              }
+              const pending = pendingTouch.current
+              if (pending && pending.pointer === event.pointerId) {
+                pendingTouch.current = null
+                clearLongPress()
+                tapGesture(pending)
+                release()
+                return
+              }
+            }
             moveGesture(event.pointerId, [event.nativeEvent])
             finishGesture()
-            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-              event.currentTarget.releasePointerCapture(event.pointerId)
-            }
+            release()
           }}
           onPointerCancel={() => cancelGesture()}
           onPointerLeave={(event) => {
@@ -919,7 +1167,7 @@ class FrameCommand<Value> {
   constructor(
     private readonly execute: (value: Value) => void | Promise<unknown>,
     private readonly merge: (current: Value, next: Value) => Value = (_current, next) => next,
-  ) { }
+  ) {}
 
   schedule(value: Value): void {
     this.pending = this.pending === undefined ? value : this.merge(this.pending, value)

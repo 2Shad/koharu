@@ -254,6 +254,7 @@
     "github": "GitHub",
     "help": "Ayuda",
     "import": "Importar páginas",
+    "more": "Más",
     "process": "Procesar",
     "processLayers": "Procesar capas seleccionadas",
     "processPages": "Procesar páginas seleccionadas",
@@ -262,6 +263,7 @@
     "runPhase": "Ejecutar {{phase}}",
     "selectAllLayers": "Seleccionar todas las capas",
     "settings": "Ajustes",
+    "share": "Compartir",
     "undo": "Deshacer",
     "view": "Ver"
   },
@@ -293,6 +295,7 @@
     "layerCount": "{{count}} capas",
     "layerCount_one": "{{count}} capas",
     "layerCount_other": "{{count}} capas",
+    "multiSelect": "Selección múltiple",
     "noImage": "Sin imagen",
     "noResults": "Ninguna página coincide con este filtro.",
     "pageName": "Nombre de página",
@@ -300,6 +303,7 @@
     "rename": "Cambiar nombre",
     "renameDescription": "Elige un nombre nuevo para esta página.",
     "renameTitle": "Cambiar nombre de página",
+    "reorder": "Reordenar {{page}}",
     "selected": "{{count}} seleccionadas"
   },
   "outputPicker": {

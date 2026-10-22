@@ -76,7 +76,10 @@ pub(crate) enum Llama {
     MacosMetal,
     #[strum(serialize = "android-cpu", props(libraries = "libllama.so,libmtmd.so"))]
     AndroidCpu,
-    #[strum(serialize = "android-vulkan", props(libraries = "libllama.so,libmtmd.so"))]
+    #[strum(
+        serialize = "android-vulkan",
+        props(libraries = "libllama.so,libmtmd.so")
+    )]
     AndroidVulkan,
 }
 

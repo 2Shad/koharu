@@ -3,8 +3,9 @@ name: Android
 on:
   push:
     branches: ['android']
-    tags: ['android-m*']
+    tags: ['android-m*', '*.*.*']
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -18,7 +19,9 @@ env:
 
 jobs:
   build:
-    name: Android arm64
+    name: Android arm64 preview
+    # Branch pushes, pull requests, and `android-m*` preview tags only.
+    if: github.ref_type != 'tag' || startsWith(github.ref_name, 'android-m')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -73,3 +76,115 @@ jobs:
             Native debug sections are dropped to keep the download small; WebView devtools
             remain available in the debug build.
           files: crates/koharu/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+
+  release:
+    name: Android arm64 release
+    # release-please tags the workspace version (`MAJOR.MINOR.PATCH`). Those tags are
+    # created with `GITHUB_TOKEN`, which does not trigger workflows, so a release is also
+    # dispatched from `.github/workflows/release-pr.yml` after it tags:
+    #
+    #   gh workflow run android.yml --ref "$TAG"
+    if: github.ref_type == 'tag' && !startsWith(github.ref_name, 'android-m')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-36 build-tools;36.0.0 ndk;27.2.12479018'
+      - name: Resolve the NDK
+        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: koharu-android
+          # The `android` branch build owns the shared dependency cache.
+          save-if: false
+      - name: Install Rust targets
+        run: rustup target add aarch64-linux-android wasm32-unknown-unknown
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --version 4.1.2 --locked
+      - uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
+      - run: bun install
+
+      # release-please owns the workspace version; `cargo metadata` reports the value it
+      # committed, and Tauri derives `versionName` / `versionCode` from it. Without this
+      # the Android generator falls back to `1` / `1.0`.
+      - name: Read the workspace version
+        id: version
+        run: |
+          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "koharu") | .version')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # Tauri has no Android signing knob and `gen/android` is generated, so the release
+      # keystore is injected through a Gradle init script instead of editing generated
+      # Kotlin. The signing secrets reach Gradle through the process environment.
+      - name: Configure release signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/signing"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/signing/upload.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/signing/upload.jks" >> "$GITHUB_ENV"
+          mkdir -p "$HOME/.gradle/init.d"
+          cat > "$HOME/.gradle/init.d/koharu-signing.gradle" <<'GRADLE'
+          allprojects {
+              afterEvaluate { project ->
+                  def android = project.extensions.findByName('android')
+                  if (android == null) {
+                      return
+                  }
+                  def release = android.signingConfigs.maybeCreate('release')
+                  release.storeFile = project.file(System.getenv('ANDROID_KEYSTORE_PATH'))
+                  release.storePassword = System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                  release.keyAlias = System.getenv('ANDROID_KEY_ALIAS')
+                  release.keyPassword = System.getenv('ANDROID_KEY_PASSWORD')
+                  android.buildTypes.getByName('release').signingConfig = release
+              }
+          }
+          GRADLE
+
+      - name: Generate the Android project
+        working-directory: crates/koharu
+        run: cargo tauri android init
+
+      - name: Build the release AAB and APK
+        working-directory: crates/koharu
+        run: |
+          cargo tauri android build \
+            --target aarch64 \
+            --split-per-abi \
+            --config "{\"version\":\"${{ steps.version.outputs.version }}\"}"
+
+      - name: Setup Sentry CLI
+        uses: matbour/setup-sentry-cli@v3
+        with:
+          token: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          organization: ${{ vars.SENTRY_ORG }}
+          project: rust
+
+      - name: Upload native symbols
+        run: bash .github/sentry.sh android
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: koharu-android-release
+          path: |
+            crates/koharu/gen/android/app/build/outputs/apk/**/*.apk
+            crates/koharu/gen/android/app/build/outputs/bundle/**/*.aab
+          if-no-files-found: error
+          retention-days: 14
+
+      # Play internal-track delivery is manual: upload the AAB from the artifact above, or
+      # run `fastlane supply --aab app-arm64-release.aab --track internal` with a service
+      # account. No Play publisher action is wired in because this repository adds no new
+      # third-party actions.

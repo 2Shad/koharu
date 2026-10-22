@@ -254,6 +254,7 @@
     "github": "GitHub",
     "help": "Справка",
     "import": "Импортировать страницы",
+    "more": "Ещё",
     "process": "Обработка",
     "processLayers": "Обработать выбранные слои",
     "processPages": "Обработать выбранные страницы",
@@ -262,6 +263,7 @@
     "runPhase": "Запустить: {{phase}}",
     "selectAllLayers": "Выбрать все слои",
     "settings": "Настройки",
+    "share": "Поделиться",
     "undo": "Отменить",
     "view": "Вид"
   },
@@ -293,6 +295,7 @@
     "layerCount": "Слоёв: {{count}}",
     "layerCount_one": "Слоёв: {{count}}",
     "layerCount_other": "Слоёв: {{count}}",
+    "multiSelect": "Множественный выбор",
     "noImage": "Нет изображения",
     "noResults": "Нет страниц, соответствующих фильтру.",
     "pageName": "Название страницы",
@@ -300,6 +303,7 @@
     "rename": "Переименовать",
     "renameDescription": "Выберите новое имя для страницы.",
     "renameTitle": "Переименовать страницу",
+    "reorder": "Изменить порядок {{page}}",
     "selected": "Выбрано: {{count}}"
   },
   "outputPicker": {

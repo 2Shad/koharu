@@ -65,6 +65,13 @@ android_vulkan = true
 
 对小型模型而言，Adreno 的 Vulkan/OpenCL 往往比 CPU 更慢，而且可能不稳定。移动端加载配置的线程数取自性能核拓扑，并使用 mmap 和 Q8 KV 缓存。
 
+本地翻译按 RAM 等级使用加载配置。在同一个 `[runtime]` 段中设置 `battery_saver = true`，会将解码与提示线程数减半、缩小提示批次，并将峰值常驻预算削减 25%，以吞吐量换取更低温和更低功耗的运行。该选项默认关闭；若想获得最低的单页延迟，请保持关闭。
+
+```toml
+[runtime]
+battery_saver = true
+```
+
 ### 基准测试
 
 在设备上运行测试工具，逐行记录结果：
@@ -74,6 +81,8 @@ cargo run -p koharu-translator --bin bench -- --model <model.gguf> --quantizatio
 ```
 
 为每台参考设备填写一行。加 `--json` 可输出原始记录。
+
+下表中的数据待参考设备实测：翻译列是各 RAM 等级的计划配置，并非实测结果。同样的三个等级也汇总在[支持的设备](/zh/installation#支持的设备)中。
 
 | 设备 | SoC | RAM | 量化 | 提示 tok/s | 生成 tok/s | 页面延迟 | 峰值 RSS | 温度 |
 | ---- | --- | --- | ---- | ---------- | ---------- | -------- | -------- | ---- |

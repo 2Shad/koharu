@@ -168,7 +168,8 @@ impl Model {
                     &MtmdContextParams {
                         use_gpu: device.backend != Backend::Cpu && backend.supports_gpu_offload(),
                         print_timings: false,
-                        n_threads: profile.map_or_else(available_threads, |profile| profile.n_threads),
+                        n_threads: profile
+                            .map_or_else(available_threads, |profile| profile.n_threads),
                         image_min_tokens: options.image_min_tokens,
                         image_max_tokens: options.image_max_tokens,
                         ..MtmdContextParams::default()

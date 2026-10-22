@@ -254,6 +254,7 @@
     "github": "GitHub",
     "help": "ヘルプ",
     "import": "ページを読み込む",
+    "more": "その他",
     "process": "処理",
     "processLayers": "選択したレイヤーを処理",
     "processPages": "選択ページを処理",
@@ -262,6 +263,7 @@
     "runPhase": "{{phase}}を実行",
     "selectAllLayers": "すべてのレイヤーを選択",
     "settings": "設定",
+    "share": "共有",
     "undo": "元に戻す",
     "view": "表示"
   },
@@ -293,6 +295,7 @@
     "layerCount": "{{count}}レイヤー",
     "layerCount_one": "{{count}}レイヤー",
     "layerCount_other": "{{count}}レイヤー",
+    "multiSelect": "複数選択",
     "noImage": "画像なし",
     "noResults": "このフィルターに一致するページはありません。",
     "pageName": "ページ名",
@@ -300,6 +303,7 @@
     "rename": "名前を変更",
     "renameDescription": "このページの新しい名前を入力します。",
     "renameTitle": "ページ名を変更",
+    "reorder": "{{page}} を並べ替え",
     "selected": "{{count}}件選択中"
   },
   "outputPicker": {

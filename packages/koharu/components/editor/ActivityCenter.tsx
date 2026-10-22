@@ -10,8 +10,9 @@ import { useKoharuStore } from '@/lib/store'
 import { commands, type Download as DownloadState, type Job } from '@koharu/bridge/protocol'
 import { Button } from '@koharu/ui/components/button'
 
-export function ActivityCenter() {
-  const { t } = useTranslation()
+// One source of truth for what counts as activity; the floating desktop panel and the
+// mobile activity sheet render the same rows, and the mobile app bar badges the count.
+function useActivityItems() {
   const jobs = useKoharuStore((state) => state.jobs)
   const downloads = useKoharuStore((state) => state.downloads)
   const activities = useMutationState({
@@ -31,8 +32,19 @@ export function ActivityCenter() {
   )
   const failedDownloads = Object.values(downloads).filter((download) => download.state === 'failed')
   const visibleDownloads = [...runningDownloads, ...failedDownloads]
-  if (activities.length === 0 && visibleJobs.length === 0 && visibleDownloads.length === 0)
-    return null
+  return { activities, visibleJobs, runningDownloads, failedDownloads, visibleDownloads }
+}
+
+/** Number of surfaces with something to report; drives the mobile app-bar badge. */
+export function useActivityCount(): number {
+  const { activities, visibleJobs, visibleDownloads } = useActivityItems()
+  return activities.length + visibleJobs.length + visibleDownloads.length
+}
+
+export function ActivityCenter() {
+  const { t } = useTranslation()
+  const count = useActivityCount()
+  if (count === 0) return null
 
   return (
     <aside
@@ -44,6 +56,21 @@ export function ActivityCenter() {
           {t('activity.title')}
         </span>
       </div>
+      <ActivityBody />
+    </aside>
+  )
+}
+
+/** The activity rows without the desktop panel chrome, for the mobile bottom sheet. */
+export function ActivityBody() {
+  const { t } = useTranslation()
+  const { activities, visibleJobs, runningDownloads, failedDownloads, visibleDownloads } =
+    useActivityItems()
+  if (activities.length === 0 && visibleJobs.length === 0 && visibleDownloads.length === 0)
+    return null
+
+  return (
+    <>
       {activities.map((activity) => (
         <div
           key={activity.id}
@@ -68,7 +95,7 @@ export function ActivityCenter() {
       {visibleJobs.map((job) => (
         <JobItem key={job.id} job={job} />
       ))}
-    </aside>
+    </>
   )
 }
 

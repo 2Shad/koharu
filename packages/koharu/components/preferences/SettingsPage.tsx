@@ -45,6 +45,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@koharu/ui/components/select'
+import { cn } from '@koharu/ui/lib/utils'
 
 const allTabs = [
   ['appearance', Palette],
@@ -60,6 +61,7 @@ type Tab = TabEntry[0]
 export function SettingsPage() {
   const { t } = useTranslation()
   const open = useKoharuStore((state) => state.settingsOpen)
+  const mobile = useKoharuStore((state) => state.platform) === 'mobile'
   const setOpen = useKoharuStore((state) => state.setSettingsOpen)
   const preferences = useKoharuStore((state) => state.preferences)
   const translationModels = useKoharuStore((state) => state.translationModels)
@@ -182,7 +184,10 @@ export function SettingsPage() {
         <Button
           type='button'
           variant='ghost'
-          className='mb-2 h-9 justify-start gap-2 rounded-lg px-2 text-[12px] text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground md:mb-5'
+          className={cn(
+            'mb-2 justify-start gap-2 rounded-lg px-2 text-[12px] text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground md:mb-5',
+            mobile ? 'h-11' : 'h-9',
+          )}
           onClick={closeSettings}
         >
           <ArrowLeft className='size-4' /> {t('settings.backToEditor')}
@@ -198,7 +203,10 @@ export function SettingsPage() {
               variant='ghost'
               size='sm'
               data-active={tab === id}
-              className='h-9 min-w-0 justify-center gap-1.5 rounded-lg px-2 text-[12px] text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground data-[active=true]:bg-accent data-[active=true]:text-accent-foreground md:h-10 md:w-full md:justify-start md:gap-3 md:px-3 md:text-left'
+              className={cn(
+                'min-w-0 justify-center gap-1.5 rounded-lg px-2 text-[12px] text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground data-[active=true]:bg-accent data-[active=true]:text-accent-foreground md:h-10 md:w-full md:justify-start md:gap-3 md:px-3 md:text-left',
+                mobile ? 'h-11' : 'h-9',
+              )}
               onClick={() => setTab(id)}
             >
               <Icon className='size-4 shrink-0' /> {t(`settings.tabs.${id}`)}
@@ -256,6 +264,7 @@ export function SettingsPage() {
 function AppearancePreferences() {
   const { theme, setTheme } = useTheme()
   const { t, i18n } = useTranslation()
+  const mobile = useKoharuStore((state) => state.platform) === 'mobile'
   const themes = [
     ['light', Sun],
     ['dark', Moon],
@@ -280,7 +289,10 @@ function AppearancePreferences() {
                 variant='ghost'
                 size='sm'
                 data-active={theme === value}
-                className='h-9 gap-1.5 text-[10px] text-muted-foreground hover:text-foreground data-[active=true]:bg-primary data-[active=true]:text-primary-foreground data-[active=true]:hover:bg-primary/90 data-[active=true]:hover:text-primary-foreground'
+                className={cn(
+                  'gap-1.5 text-[10px] text-muted-foreground hover:text-foreground data-[active=true]:bg-primary data-[active=true]:text-primary-foreground data-[active=true]:hover:bg-primary/90 data-[active=true]:hover:text-primary-foreground',
+                  mobile ? 'h-11' : 'h-9',
+                )}
                 onClick={() => setTheme(value)}
               >
                 <Icon className='size-3.5' /> {t(`settings.appearance.themes.${value}`)}
@@ -296,7 +308,7 @@ function AppearancePreferences() {
             )}
             onValueChange={(language) => language && i18n.changeLanguage(language)}
           >
-            <SelectTrigger className='h-8 w-full text-[11px]'>
+            <SelectTrigger className={cn('w-full text-[11px]', mobile ? 'h-11' : 'h-8')}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -315,6 +327,7 @@ function AppearancePreferences() {
 
 function ShortcutPreferences() {
   const { t } = useTranslation()
+  const mobile = useKoharuStore((state) => state.platform) === 'mobile'
   const shortcuts = useKoharuStore((state) => state.shortcuts)
   const setShortcut = useKoharuStore((state) => state.setShortcut)
   const actions: ShortcutAction[] = [
@@ -339,7 +352,15 @@ function ShortcutPreferences() {
               aria-label={t('settings.shortcuts.inputLabel', { action: t(shortcutKeys[action]) })}
               maxLength={1}
               value={shortcuts[action]}
-              className='ml-auto h-8 w-14 text-center text-[12px] uppercase'
+              autoComplete='off'
+              autoCapitalize='none'
+              autoCorrect='off'
+              spellCheck={false}
+              enterKeyHint='done'
+              className={cn(
+                'ml-auto text-center text-[12px] uppercase',
+                mobile ? 'h-11 w-16' : 'h-8 w-14',
+              )}
               onChange={(event) => setShortcut(action, event.currentTarget.value)}
             />
           </PreferenceRow>

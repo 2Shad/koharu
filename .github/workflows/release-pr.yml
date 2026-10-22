@@ -48,4 +48,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.release.outputs.tag }}
-        run: gh workflow run release.yml --ref "$TAG"
+        run: |
+          gh workflow run release.yml --ref "$TAG"
+          gh workflow run android.yml --ref "$TAG"
