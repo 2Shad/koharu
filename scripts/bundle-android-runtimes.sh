@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Populate the Android APK's jniLibs with the prebuilt native runtimes.
+# Copy the prebuilt native runtimes into the APK's jniLibs.
 #
 # `tauri android build` copies everything under jniLibs into the APK, and
 # `Torch::AndroidCpu` / `Llama::AndroidCpu` dlopen these by bare soname through
@@ -8,33 +8,39 @@
 # below MUST stay identical to those props:
 #   crates/koharu-runtime/src/runtime/packages/{torch,llama}.rs
 #
-# The runtimes are built outside this repository (koharu-rs/torch and
-# koharu-rs/llama). Point the script at a checkout with the two build trees:
-#   <root>/torch/install/lib/          libc10.so libtorch_global_deps.so ...
-#   <root>/torch/shim-install/         libkoharu-torch.so
-#   <root>/llama/build/bin/            libllama.so libmtmd.so
+# The runtimes are built outside this repository. Point the script at the two
+# directories holding the built libraries, for example:
+#   llama: libllama.so libmtmd.so
+#   torch: libc10.so libtorch_global_deps.so libtorch_cpu.so libtorch.so
+#          libkoharu-torch.so
 #
-# Usage: scripts/bundle-android-runtimes.sh <root> [dest]
+# Usage: scripts/bundle-android-runtimes.sh <llama-dir> <torch-dir> [dest]
 set -euo pipefail
 
-src=${1:?usage: $0 <koharu-rs-checkout> [dest]}
+llama_dir=${1:?usage: $0 <llama-dir> <torch-dir> [dest]}
+torch_dir=${2:?usage: $0 <llama-dir> <torch-dir> [dest]}
 root=$(cd "$(dirname "$0")/.." && pwd)
-dest=${2:-"$root/crates/koharu/gen/android/app/src/main/jniLibs/arm64-v8a"}
+dest=${3:-"$root/crates/koharu/gen/android/app/src/main/jniLibs/arm64-v8a"}
 
-libraries=(
-  "$src/torch/install/lib/libc10.so"
-  "$src/torch/install/lib/libtorch_global_deps.so"
-  "$src/torch/install/lib/libtorch_cpu.so"
-  "$src/torch/install/lib/libtorch.so"
-  "$src/torch/shim-install/libkoharu-torch.so"
-  "$src/llama/build/bin/libllama.so"
-  "$src/llama/build/bin/libmtmd.so"
+sources=(
+  "$llama_dir/libllama.so"
+  "$llama_dir/libmtmd.so"
+  "$torch_dir/libc10.so"
+  "$torch_dir/libtorch_global_deps.so"
+  "$torch_dir/libtorch_cpu.so"
+  "$torch_dir/libtorch.so"
+  "$torch_dir/libkoharu-torch.so"
 )
 
+missing=0
+for source in "${sources[@]}"; do
+  [ -f "$source" ] || { echo "missing: $source" >&2; missing=1; }
+done
+[ "$missing" -eq 0 ] || exit 1
+
 mkdir -p "$dest"
-for library in "${libraries[@]}"; do
-  [ -f "$library" ] || { echo "missing: $library" >&2; exit 1; }
-  ln -sf "$(readlink -f "$library")" "$dest/$(basename "$library")"
+for source in "${sources[@]}"; do
+  cp -f "$source" "$dest/$(basename "$source")"
 done
 
-echo "bundled ${#libraries[@]} libraries into $dest"
+echo "bundled ${#sources[@]} libraries into $dest"

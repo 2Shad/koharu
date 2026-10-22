@@ -262,9 +262,17 @@ foreground-service requirement.
       are gone on mobile. Assets are served from `http://tauri.localhost/`, no dev server.
 - [x] Desktop `cargo check` passes after the fixes
 - [x] Install and boot on a physical phone (Android 16, arm64; CI preview APK)
-- [ ] WebGPU probe on hardware — the editor canvas rendered an imported page on the phone
-      (no `canvas.unavailable` state, so `koharu-canvas` runs), but the explicit
-      `UNRESTRICTED_EXTERNAL_TEXTURE_COPIES` value was not recorded; still open
+- [x] WebGPU probe on hardware (2026-10-22, test phone, Android 16, Chrome/155
+      WebView). `navigator.gpu` present; `requestAdapter({powerPreference:'high-performance'})`
+      returns an adapter reported as `vendor=qualcomm, architecture=adreno-8xx`,
+      `maxTextureDimension2D=16384`, with `core-features-and-limits`, `subgroups`,
+      `float32-filterable`, `texture-compression-astc/bc/etc2`, `timestamp-query`.
+      `UNRESTRICTED_EXTERNAL_TEXTURE_COPIES` is a wgpu *downlevel* flag and has no JS feature
+      name, so it was confirmed through the real code path instead: the canvas is created and
+      renders the imported page, and `koharu-canvas::create_canvas` returns an error for an
+      adapter without that flag — so the flag is present on this GPU. The canvas is
+      `1060 × 1881` backing at DPR 3 (`353 × 792` CSS). Device page size is 4 KB
+      (`getconf PAGE_SIZE`), so 16 KB alignment is not enforced by this phone.
 
 **Spike to run in this milestone:** log `navigator.gpu` availability and adapter
 `UNRESTRICTED_EXTERNAL_TEXTURE_COPIES` from the Android WebView. This single result decides
@@ -273,7 +281,8 @@ whether `koharu-canvas` works as-is or needs a fallback (see risks).
 Emulator result: `navigator.gpu` is present but `navigator.gpu.requestAdapter()` returns
 `null` — the emulator renders in software (SwiftShader), so
 `UNRESTRICTED_EXTERNAL_TEXTURE_COPIES` could not be checked. The emulator cannot decide the
-canvas path; rerun the probe on a physical GPU.
+canvas path; the physical-device probe above resolves the spike. **The canvas path is
+supported on Adreno; no native SurfaceView or CPU-composited fallback is needed.**
 
 ---
 
@@ -309,13 +318,21 @@ canvas path; rerun the probe on a physical GPU.
       (the runtime store is configured under `app_data_dir` on mobile)
 
 **Exit criteria:** import a CBZ, open the project, export a PNG, save an API key, run a long
-job with the screen off.
+job with the screen off. Verified on the phone: import (a JPG through the system picker),
+open, PNG export through the tree picker, CBZ export through create-document (a valid ZIP
+containing `0001_<page label>.png`), and the BYOK credential round trip. Left: a CBZ/RAR
+import, PSD export, and the long job with the screen off — the last one needs the native
+runtimes, because every stage currently fails its load.
 
 Device progress: import is verified — a real manga JPG imported through the system picker into
-a new project. The foreground-service crash that a fast-failing job triggered is fixed (see the
-risk register); the remaining items (tree export, Keystore key, long job with the screen off)
-are unverified. The import picker on the phone is the M1 implementation, not the M0 stub; the
-earlier "importing files is not supported" report came from the M0 preview.
+a new project. Export is verified — a PNG came out through the system tree picker at full
+resolution. The Keystore-backed credential store is verified — a provider credential persisted
+across a WebView reload (shown as `Configured`, never echoed back) and cleared again from the
+settings page. The foreground-service crash that a fast-failing job triggered is fixed (see the
+risk register). Remaining: PSD/CBZ export and the long job with the screen off, which needs a
+stage that can actually load (the native runtimes). The import picker on the phone is the M1
+implementation, not the M0 stub; the earlier "importing files is not supported" report came
+from the M0 preview.
 
 **Risk spike:** resolved. `tauri-plugin-dialog` on Android returns opaque `content://` URIs
 and cannot pick a directory, which the PNG/PSD export needs. The plugin also rejects on
@@ -427,18 +444,23 @@ and the recorded parity/benchmark numbers.
 - [x] Hide the Agent panel on Android v1 (commands stay compiled)
 - [x] Locale keys for every new string in all 11 locales (`menu.share`, `menu.more`,
       `navigator.multiSelect`, `navigator.reorder`)
-- [ ] Screenshots at 360×800, 412×915, 800×1280 (plus a long-label case)
-      — not captured: needs a device/emulator or a browser harness that can run the
-      Tauri-backed build. This is the remaining M4 exit gate.
+- [x] Screenshots at 360×800, 412×915, 800×1280 (plus a long-label case)
+      — captured 2026-10-22 on the foldable by overriding the display
+      (`wm size <px>` + `wm density 480`, then `wm size reset`/`wm density reset`), which yields
+      exact CSS viewports: `1080×2400` → 360×800, `1236×2745` → 412×915, `2400×3840` → 800×1280.
+      All three render the app bar + model chip + Run, the WebGPU canvas, and the floating bottom
+      toolbar; the project title in the app bar truncates with an ellipsis at every width, which
+      is the long-label case. Remember `screencap -d <display-id>` on this foldable.
 
 **Exit criteria:** a page can be imported, edited, typeset, and exported on a phone without
 a keyboard, mouse, or hover.
 
 Device progress: import, the mobile shell (app bar + Pages/Inspector/Activity sheets), the
-canvas render, and the Activity sheet's failure surface on the phone. The edit → typeset →
-export pass and the screenshots are still open. Capture them with an explicit display id: the
-foldable's default `screencap` target is the folded panel and comes back black (see
-[Debugging on a device](#debugging-on-a-device)).
+canvas render, the Activity sheet's failure surface, and the layout at 360×800 / 412×915 /
+800×1280 are verified on the phone. The edit → typeset → export pass is partly verified: a
+full-resolution PNG export (1126 × 1600, named `0001_<page label>.png`) landed in
+`Documents/Test/` through the SAF tree picker. **Typeset needs translation output, so it stays
+blocked on the native runtimes.**
 
 ---
 
@@ -480,7 +502,7 @@ foldable's default `screencap` target is the folded panel and comes back black (
 
 | Risk | Impact | Mitigation | Where |
 |---|---|---|---|
-| WebGPU missing in Android **WebView**, or `UNRESTRICTED_EXTERNAL_TEXTURE_COPIES` absent | Canvas unusable | Probe run in M0: the emulator (SwiftShader) reports `navigator.gpu` but `requestAdapter()` returns `null`, so hardware must confirm; if absent, add a native SurfaceView present path or a CPU-composited fallback before M4 | M0 |
+| WebGPU missing in Android **WebView**, or `UNRESTRICTED_EXTERNAL_TEXTURE_COPIES` absent | Canvas unusable | Resolved 2026-10-22 on hardware (Adreno 8xx): adapter present, `create_canvas` succeeds and renders, so the downlevel flag is there. No native SurfaceView present path or CPU-composited fallback needed | M0/closed |
 | libtorch Android build, size, or operator coverage | M3 slips | Timebox a build spike first; fall back to an AAB feature module; selective-ops build only if size forces it | M3 |
 | Gemma 4 E4B memory on 8 GB | OOM | RAM-class profiles, text-only translation, E2B below 8 GB | M2 |
 | Sustained decode speed | Poor UX | Queue + foreground service, per-page progress, fast profile (Qwen 3.5 0.8B) | M2/M4 |
@@ -573,6 +595,19 @@ Signals to reach for, in order:
   `getifaddrs`, which needs API ≥ 24).
 - **Not available:** `debuggerd` and `/proc/locks` need root and production builds reject
   `adb root`; `/proc/<pid>/task/*/wchan` reads back `0`. Work from the app log and store state.
+
+Click through the Export Project submenu for the remaining codecs: PNG uses the tree picker
+(one file per page, written as `0001_<page label>.png`), CBZ uses create-document with the
+project name pre-filled. Drive the system picker with `uiautomator dump` — its XML gives exact
+bounds, and the dump's coordinates are the panel's, so a row hidden under the toolbar looks
+tappable but is not. The root of internal storage and `Download` are restricted roots on
+Android 11+ ("Can't use this folder"); pick `Documents`, then `USE THIS FOLDER`, then `ALLOW`.
+
+Device facts for the mobile profile (test phone, Android 16): `MemTotal` 15,601,536 kB
+≈ 14.9 GiB → `RamClass::High` (5.5 GiB translation budget), so Gemma 4 E4B fits and is the
+right default (`Q2_K_XL` 3.22 GB for headroom, `Q4_K_XL` 4.22 GB also inside budget). The
+phone pulled 52 MB from Hugging Face in 2.1 s (~24 MB/s), so on-device model downloads are
+practical. Page size is 4 KB, so 16 KB library alignment is not exercised by this phone.
 
 ---
 
