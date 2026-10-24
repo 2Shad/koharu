@@ -1408,6 +1408,35 @@ describe('greenfield editor', () => {
     )
   })
 
+  it('hides the diffusion inpainting models on mobile and clamps a stale selection', async () => {
+    installProject()
+    const user = userEvent.setup()
+    useKoharuStore.setState({
+      settingsOpen: true,
+      platform: 'mobile',
+      preferences: {
+        ...preferences,
+        pipeline: { ...preferences.pipeline, inpainting: { model: 'flux2-klein' } },
+      },
+    })
+    vi.spyOn(commands, 'savePreferences').mockResolvedValue(preferences)
+    render(
+      <ThemeProvider attribute='class'>
+        <SettingsPage />
+      </ThemeProvider>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pipeline' }))
+    expect(screen.getByLabelText('Inpainting model')).toHaveTextContent('LaMa')
+    await user.click(screen.getByLabelText('Inpainting model'))
+    expect(screen.getByRole('option', { name: 'LaMa' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'AOT Inpainting' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'FLUX.2 Klein' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'RORem Mixed' })).not.toBeInTheDocument()
+
+    useKoharuStore.setState({ platform: 'desktop' })
+  })
+
   it('keeps generation controls independent from model capabilities', async () => {
     installProject()
     const user = userEvent.setup()

@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next'
 import {
   defaultModel,
   modelNames,
-  modelOptions,
+  modelOptionsFor,
   replaceStage,
   stageModel,
   type ModelName,
@@ -20,6 +20,7 @@ import {
   PreferenceSection,
   TextField,
 } from '@/components/preferences/PreferenceFields'
+import { useKoharuStore } from '@/lib/store'
 import type { PipelineConfig } from '@koharu/bridge/protocol'
 import {
   Select,
@@ -43,6 +44,8 @@ export function PipelinePreferences({
   onChange: (value: PipelineConfig) => void
 }) {
   const { t } = useTranslation()
+  const platform = useKoharuStore((state) => state.platform)
+  const options = modelOptionsFor(platform)
   return (
     <PreferencePage
       title={t('settings.pipeline.title')}
@@ -50,7 +53,7 @@ export function PipelinePreferences({
     >
       <PreferenceSection title={t('settings.pipeline.processing')}>
         {stages.map(([stage, Icon]) => {
-          const model = stageModel(value, stage)
+          const model = stageModel(value, stage, platform)
           const title = t(`settings.pipeline.stages.${stage}.title`)
           return (
             <PreferenceRow
@@ -65,7 +68,7 @@ export function PipelinePreferences({
                   <Select
                     value={model.model}
                     items={Object.fromEntries(
-                      modelOptions[stage].map((name) => [name, modelNames[name]]),
+                      options[stage].map((name) => [name, modelNames[name]]),
                     )}
                     onValueChange={(name) => {
                       if (name) {
@@ -80,7 +83,7 @@ export function PipelinePreferences({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {modelOptions[stage].map((name) => (
+                      {options[stage].map((name) => (
                         <SelectItem key={name} value={name}>
                           {modelNames[name]}
                         </SelectItem>

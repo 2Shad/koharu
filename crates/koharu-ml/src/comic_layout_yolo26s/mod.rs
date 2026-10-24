@@ -46,8 +46,14 @@ impl ComicLayoutYolo26sSegmenter {
             .resolve()
             .await
             .context("failed to resolve comic-layout-yolo26s weights")?;
-        let config = ComicLayoutYolo26sConfig::from_file(&config_path)
+        let mut config = ComicLayoutYolo26sConfig::from_file(&config_path)
             .with_context(|| format!("failed to read {}", config_path.display()))?;
+        // The 1280 px model makes multi-GB im2col buffers per detection conv on
+        // Android. 768 stays divisible by 32 and keeps the mobile working set
+        // bounded; desktop uses the checkpoint resolution.
+        if cfg!(target_os = "android") {
+            config.image_size = config.image_size.min(768);
+        }
         let processor = ComicLayoutYolo26sImageProcessor::new(&config)?;
         let mut model = Model::new(&config, device)?;
         model

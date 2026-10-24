@@ -92,6 +92,14 @@ pub fn has_lapack() -> bool {
 pub fn has_mkldnn() -> bool {
     unsafe_torch!(koharu_torch_sys::at_context_has_mkldnn())
 }
+pub fn user_enabled_mkldnn() -> bool {
+    unsafe_torch!(koharu_torch_sys::at_context_user_enabled_mkldnn())
+}
+pub fn set_user_enabled_mkldnn(enabled: bool) {
+    unsafe_torch!(koharu_torch_sys::at_context_set_user_enabled_mkldnn(
+        i32::from(enabled)
+    ))
+}
 pub fn has_magma() -> bool {
     unsafe_torch!(koharu_torch_sys::at_context_has_magma())
 }

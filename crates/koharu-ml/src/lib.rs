@@ -29,7 +29,7 @@ pub mod speech_bubble_yolov8m;
 
 pub use koharu_diffusion as diffusion;
 pub use koharu_llama as llama;
-pub use koharu_runtime::{Backend, Device, DeviceType, Feature};
+pub use koharu_runtime::{Backend, Device, DeviceType, Feature, release_freed_memory};
 pub use koharu_torch as torch;
 
 static LLAMA: OnceCell<LlamaBackend> = OnceCell::const_new();
@@ -59,6 +59,14 @@ pub async fn init() -> anyhow::Result<()> {
             // activate must not be initialized.
             let features = runtime.features();
             let _ = FEATURES.set(features.clone());
+
+            // Android retains freed large blocks; start every run with the
+            // secondary cache disabled so stage churn does not accumulate.
+            release_freed_memory();
+            // Only AOT opts into oneDNN. Global dispatch would retain
+            // multi-GB im2col buffers in detection.
+            #[cfg(target_os = "android")]
+            koharu_torch::utils::set_user_enabled_mkldnn(false);
 
             if features.contains(&Feature::Llama) {
                 LLAMA

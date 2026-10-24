@@ -71,6 +71,9 @@ impl<'a> Execution<'a> {
                 stages: stages.clone(),
             },
         );
+        // An evicting platform keeps one stage resident, so stage-major
+        // scheduling loads each model once for the whole batch.
+        let stage_major = runner.evicts_between_stages();
 
         Ok(Self {
             runner,
@@ -79,7 +82,7 @@ impl<'a> Execution<'a> {
             stop: request.stop,
             progress: request.progress,
             scope,
-            scheduler: Scheduler::new(&pages, &stages),
+            scheduler: Scheduler::new(&pages, &stages, stage_major),
             scene: snapshot,
             images: BTreeMap::new(),
             busy_stages: BTreeSet::new(),
@@ -102,7 +105,14 @@ impl<'a> Execution<'a> {
         let runner = self.runner.clone();
         let mut running = FuturesUnordered::new();
         loop {
-            while let Some(job) = self.take_ready_job() {
+            // A platform that evicts between stages can afford only one stage
+            // resident, so it also runs one job at a time: page-level
+            // parallelism would hold the working set of several pages at once
+            // and defeat the eviction policy.
+            while running.is_empty() || !runner.evicts_between_stages() {
+                let Some(job) = self.take_ready_job() else {
+                    break;
+                };
                 running.push(runner.run(job));
             }
 
@@ -116,6 +126,9 @@ impl<'a> Execution<'a> {
             if let Err(error) = self.apply_completion(completion).await {
                 self.failure = Some(error);
             }
+            // Each completed stage leaves freed tensors in the allocator;
+            // return them before the next page allocates its own.
+            koharu_ml::release_freed_memory();
         }
 
         // A platform that evicts between stages keeps nothing resident, so an

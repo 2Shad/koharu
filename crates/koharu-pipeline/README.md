@@ -88,6 +88,11 @@ increased makespan by 2.5-4x through kernel and memory-bandwidth contention.
 Serial model execution therefore produces more pages per second than maximizing
 the activity percentage reported by the GPU.
 
+A platform whose memory policy evicts between stages schedules stage-major
+instead: detection runs across every page in project order, then OCR, and so on,
+so each model loads once for the batch. Prerequisites and one-job-per-stage
+still hold, and every committed stage remains its own page-local undo step.
+
 The readiness window still matters: completed detection immediately exposes
 both of that page's branches, commits remain page-local, and the next best job
 can start without waiting for an unrelated page to finish. CPU-only execution

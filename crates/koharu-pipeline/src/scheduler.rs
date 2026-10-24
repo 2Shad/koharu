@@ -52,10 +52,11 @@ pub(crate) struct Scheduler {
     active_pages: usize,
     head: usize,
     total: usize,
+    stage_major: bool,
 }
 
 impl Scheduler {
-    pub(crate) fn new(pages: &[EntityId], stages: &[Stage]) -> Self {
+    pub(crate) fn new(pages: &[EntityId], stages: &[Stage], stage_major: bool) -> Self {
         let pages = pages
             .iter()
             .map(|page| PageWork {
@@ -81,6 +82,7 @@ impl Scheduler {
             active_pages: 0,
             head: 0,
             total,
+            stage_major,
         }
     }
 
@@ -89,6 +91,41 @@ impl Scheduler {
     }
 
     pub(crate) fn start_next(
+        &mut self,
+        busy_stages: &BTreeSet<Stage>,
+    ) -> Option<(EntityId, Stage)> {
+        if self.stage_major {
+            self.start_next_stage_major(busy_stages)
+        } else {
+            self.start_next_page_major(busy_stages)
+        }
+    }
+
+    /// Selects one stage across all pages before moving to the next stage, so a
+    /// platform that evicts between stages keeps one model loaded per stage for
+    /// the whole batch. Pages still enter in project order within a stage.
+    fn start_next_stage_major(
+        &mut self,
+        busy_stages: &BTreeSet<Stage>,
+    ) -> Option<(EntityId, Stage)> {
+        let stage_count = self.pages.first()?.stages.len();
+        for stage_index in 0..stage_count {
+            let stage = self.pages[0].stages[stage_index].stage;
+            if busy_stages.contains(&stage) {
+                continue;
+            }
+            for page_index in 0..self.pages.len() {
+                let page = &mut self.pages[page_index];
+                if page.stages[stage_index].state == WorkState::Pending && page.ready(stage_index) {
+                    page.stages[stage_index].state = WorkState::Running;
+                    return Some((page.page, stage));
+                }
+            }
+        }
+        None
+    }
+
+    fn start_next_page_major(
         &mut self,
         busy_stages: &BTreeSet<Stage>,
     ) -> Option<(EntityId, Stage)> {
@@ -161,7 +198,7 @@ mod tests {
     #[test]
     fn starts_pages_in_order_and_models_independently() {
         let pages = pages(2);
-        let mut scheduler = Scheduler::new(&pages, &Stage::ALL);
+        let mut scheduler = Scheduler::new(&pages, &Stage::ALL, false);
         let mut busy = BTreeSet::new();
 
         let first = scheduler.start_next(&busy).unwrap();
@@ -193,7 +230,7 @@ mod tests {
     fn sliding_window_backpressures_fast_upstream_models() {
         let pages = pages(4);
         let stages = [Stage::Detection, Stage::Ocr, Stage::Inpainting];
-        let mut scheduler = Scheduler::new(&pages, &stages);
+        let mut scheduler = Scheduler::new(&pages, &stages, false);
         let mut busy = BTreeSet::new();
 
         assert_eq!(
@@ -216,5 +253,53 @@ mod tests {
         assert!(scheduler.complete_stage(pages[0], Stage::Inpainting));
         busy.clear();
         assert_eq!(scheduler.start_next(&busy), Some((pages[1], Stage::Ocr)));
+    }
+
+    #[test]
+    fn stage_major_runs_one_stage_across_all_pages() {
+        let pages = pages(3);
+        let mut scheduler = Scheduler::new(&pages, &Stage::ALL, true);
+        let mut busy = BTreeSet::new();
+        let mut order = Vec::new();
+
+        while let Some(job) = scheduler.start_next(&busy) {
+            assert!(busy.insert(job.1), "a stage must have one job in flight");
+            order.push(job);
+            scheduler.complete_stage(job.0, job.1);
+            busy.clear();
+        }
+
+        let expected = Stage::ALL
+            .into_iter()
+            .flat_map(|stage| pages.iter().map(move |page| (*page, stage)))
+            .collect::<Vec<_>>();
+        assert_eq!(order, expected);
+        assert_eq!(order.len(), scheduler.total());
+    }
+
+    #[test]
+    fn page_major_finishes_a_page_before_starting_the_next() {
+        let pages = pages(2);
+        let mut scheduler = Scheduler::new(&pages, &Stage::ALL, false);
+        let busy = BTreeSet::new();
+        let mut order = Vec::new();
+
+        for _ in 0..Stage::ALL.len() {
+            let job = scheduler.start_next(&busy).unwrap();
+            order.push(job);
+            scheduler.complete_stage(job.0, job.1);
+        }
+        order.push(scheduler.start_next(&busy).unwrap());
+
+        assert_eq!(
+            order,
+            [
+                (pages[0], Stage::Detection),
+                (pages[0], Stage::Ocr),
+                (pages[0], Stage::Translation),
+                (pages[0], Stage::Inpainting),
+                (pages[1], Stage::Detection),
+            ]
+        );
     }
 }

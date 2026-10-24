@@ -3,6 +3,7 @@ import type {
   InpaintingModel,
   OcrModel,
   PipelineConfig,
+  Platform,
   Stage,
 } from '@koharu/bridge/protocol'
 
@@ -15,6 +16,13 @@ export const modelOptions = {
   ocr: ['paddleocr-vl-1.6', 'manga-ocr', 'baberu-ocr', 'hayai-ocr'],
   inpainting: ['lama', 'aot-inpainting', 'flux2-klein', 'rorem-mixed'],
 } satisfies Record<ModelStage, ModelName[]>
+
+// Mobile ships no diffusion runtime package, so the generative inpainting models
+// cannot load there. Keep them desktop-only rather than offering a dead choice.
+export function modelOptionsFor(platform: Platform): Record<ModelStage, ModelName[]> {
+  if (platform !== 'mobile') return modelOptions
+  return { ...modelOptions, inpainting: ['lama', 'aot-inpainting'] }
+}
 
 export const modelNames: Record<ModelName, string> = {
   'koharu-layout-rfdetr-seg-2xl': 'Koharu Layout RF-DETR Seg 2XL',
@@ -51,14 +59,21 @@ export function defaultModel(model: ModelName): PipelineModel {
   }
 }
 
-export function stageModel(config: PipelineConfig, stage: ModelStage): PipelineModel {
+export function stageModel(
+  config: PipelineConfig,
+  stage: ModelStage,
+  platform: Platform,
+): PipelineModel {
   const selected =
     stage === 'detection' ? config.detection : stage === 'ocr' ? config.ocr : config.inpainting
   if (selected) {
-    const profile = config.processor?.[selected.model as keyof typeof config.processor]
-    return profile ? ({ model: selected.model, ...profile } as PipelineModel) : selected
+    const available = modelOptionsFor(platform)[stage]
+    if (available.includes(selected.model)) {
+      const profile = config.processor?.[selected.model as keyof typeof config.processor]
+      return profile ? ({ model: selected.model, ...profile } as PipelineModel) : selected
+    }
   }
-  return defaultModel(modelOptions[stage][0]!)
+  return defaultModel(modelOptionsFor(platform)[stage][0]!)
 }
 
 export function replaceStage(

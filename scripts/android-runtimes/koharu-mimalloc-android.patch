@@ -1,0 +1,18 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 0e7ee8b..a2f5f8d 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -463,7 +463,12 @@ if(CMAKE_C_COMPILER_ID MATCHES "AppleClang|Clang|GNU|Intel" AND NOT CMAKE_SYSTEM
+       list(APPEND mi_cflags_dynamic -ftls-model=initial-exec)
+       message(STATUS "Use local dynamic TLS for the static build (since MI_LIBC_MUSL=ON)")
+     else()
+-      list(APPEND mi_cflags -ftls-model=initial-exec)
++      # Koharu: bionic refuses initial-exec TLS in a dlopen'd library
++      # ("TLS symbol ... using IE access model"). The app loads libc10
++      # through its bundled loader, so keep the compiler default here.
++      if(NOT ANDROID)
++        list(APPEND mi_cflags -ftls-model=initial-exec)
++      endif()
+     endif()
+   endif()
+   if(MI_OVERRIDE)

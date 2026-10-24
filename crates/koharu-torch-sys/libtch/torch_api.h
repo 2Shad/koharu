@@ -177,6 +177,8 @@ bool at_context_has_openmp();
 bool at_context_has_mkl();
 bool at_context_has_lapack();
 bool at_context_has_mkldnn();
+bool at_context_user_enabled_mkldnn();
+void at_context_set_user_enabled_mkldnn(int b);
 bool at_context_has_magma();
 bool at_context_has_cuda();
 bool at_context_has_cudart();

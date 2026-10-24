@@ -1,0 +1,153 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index a8b655d..bfe17a0 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -710,9 +710,10 @@ endif()
+ # applicable to mobile are disabled by this variable. Setting
+ # `BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN` environment variable can force it
+ # to do mobile build with host toolchain - which is useful for testing purpose.
+-if(ANDROID
+-   OR IOS
+-   OR DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
++if((ANDROID
++    OR IOS
++    OR DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
++   AND NOT KOHARU_FULL_LIBTORCH)
+   set(INTERN_BUILD_MOBILE ON)
+   message(WARNING "INTERN_BUILD_MOBILE is on, disabling BUILD_LAZY_TS_BACKEND")
+   set(BUILD_LAZY_TS_BACKEND OFF)
+diff --git a/aten/src/ATen/DynamicLibrary.cpp b/aten/src/ATen/DynamicLibrary.cpp
+index df933c2..c751722 100644
+--- a/aten/src/ATen/DynamicLibrary.cpp
++++ b/aten/src/ATen/DynamicLibrary.cpp
+@@ -12,7 +12,9 @@
+ namespace at {
+ 
+ 
+-#ifndef C10_MOBILE
++// Koharu: the Android full-libtorch build (KOHARU_FULL_LIBTORCH) keeps the
++// desktop JIT CPU fuser, which calls at::DynamicLibrary. The Android
++// toolchain still defines C10_MOBILE, which would compile this away.
+ #ifndef _WIN32
+ 
+ // Unix
+@@ -101,7 +103,6 @@ DynamicLibrary::~DynamicLibrary() {
+   FreeLibrary((HMODULE)handle);
+ }
+ 
+-#endif
+ #endif
+ 
+ } // namespace at
+diff --git a/caffe2/CMakeLists.txt b/caffe2/CMakeLists.txt
+index e4a0454..98ae521 100644
+--- a/caffe2/CMakeLists.txt
++++ b/caffe2/CMakeLists.txt
+@@ -2085,3 +2085,13 @@ if(MSVC)
+   endforeach()
+ endif()
+ endif()
++
++# Koharu: the JIT IR header instantiates c10::DynamicType::fallback() from a
++# template inside the tch shim, so the definition has to be in libtorch_cpu's
++# dynamic symbol table. The global -fvisibility=hidden keeps it out.
++if(KOHARU_FULL_LIBTORCH)
++  set_source_files_properties(
++    ${PROJECT_SOURCE_DIR}/aten/src/ATen/core/dynamic_type.cpp
++    PROPERTIES COMPILE_OPTIONS "-fvisibility=default" # KOHARU_FULL_LIBTORCH visibility
++  )
++endif()
+diff --git a/cmake/Dependencies.cmake b/cmake/Dependencies.cmake
+index 2baa187..9fe2639 100644
+--- a/cmake/Dependencies.cmake
++++ b/cmake/Dependencies.cmake
+@@ -430,7 +430,10 @@ set(CONFU_DEPENDENCIES_BINARY_DIR ${PROJECT_BINARY_DIR}/confu-deps
+ # ---[ pthreadpool
+ # Only add a dependency on pthreadpool if we are on a mobile build
+ # or are building any of the libraries in the {Q/X}NNPACK family.
+-if(INTERN_BUILD_MOBILE OR NOT DISABLE_NNPACK_AND_FAMILY)
++# Koharu: Android is a C10_MOBILE platform regardless of INTERN_BUILD_MOBILE
++# (see torch/headeronly/macros/Macros.h), so ATen's native parallel backend
++# always needs caffe2::pthreadpool.  Enable it here too.
++if(INTERN_BUILD_MOBILE OR ANDROID OR NOT DISABLE_NNPACK_AND_FAMILY)
+   set(USE_PTHREADPOOL ON CACHE BOOL "" FORCE)
+   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_PTHREADPOOL")
+ 
+@@ -1399,7 +1402,10 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
+   if(NOT USE_SYSTEM_ONNX)
+     # In mobile build we care about code size, and so we need drop
+     # everything (e.g. checker) in onnx but the pb definition.
+-    if(ANDROID OR IOS)
++    # Koharu: an Android build that keeps the full C++ frontend
++    # (KOHARU_FULL_LIBTORCH) also compiles the JIT ONNX serialization sources,
++    # which call ONNX's checker and shape inference, not just the proto defs.
++    if((ANDROID OR IOS) AND NOT KOHARU_FULL_LIBTORCH)
+       caffe2_interface_library(onnx_proto onnx_library)
+     else()
+       caffe2_interface_library(onnx onnx_library)
+
+diff --git a/aten/src/ATen/native/mkldnn/IDeepRegistration.cpp b/aten/src/ATen/native/mkldnn/IDeepRegistration.cpp
+index 4935286..9e7e380 100644
+--- a/aten/src/ATen/native/mkldnn/IDeepRegistration.cpp
++++ b/aten/src/ATen/native/mkldnn/IDeepRegistration.cpp
+@@ -4,6 +4,7 @@
+ #if AT_MKLDNN_ENABLED()
+ 
+ #include <c10/core/Allocator.h>
++#include <c10/core/impl/alloc_cpu.h>
+ // needs to be included only once in library.
+ #include <ideep_pin_singletons.hpp>
+ #include <ATen/native/mkldnn/IDeepRegistration.h>
+@@ -12,12 +13,25 @@ using namespace ideep;
+ 
+ static RegisterEngineAllocator cpu_alloc(
+   engine::cpu_engine(),
++#ifdef C10_MOBILE
++  // Koharu: on C10_MOBILE the default CPU allocator is
++  // DefaultMobileCPUAllocator, whose raw_allocate() returns the pre-guard
++  // offset pointer while raw_deallocate() expects the base context pointer.
++  // ideep wants a plain malloc/free pair, so use c10's CPU entry points.
++  [](size_t size) {
++    return c10::alloc_cpu(size);
++  },
++  [](void* p) {
++    c10::free_cpu(p);
++  }
++#else
+   [](size_t size) {
+     return c10::GetAllocator(c10::DeviceType::CPU)->raw_allocate(size);
+   },
+   [](void* p) {
+     c10::GetAllocator(c10::DeviceType::CPU)->raw_deallocate(p);
+   }
++#endif
+ );
+ 
+ namespace at::native::mkldnn{
+diff --git a/c10/core/impl/alloc_cpu.cpp b/c10/core/impl/alloc_cpu.cpp
+index d48a625..429ad16 100644
+--- a/c10/core/impl/alloc_cpu.cpp
++++ b/c10/core/impl/alloc_cpu.cpp
+@@ -101,15 +101,18 @@ void* alloc_cpu(size_t nbytes) {
+       nbytes);
+ 
+   void* data = nullptr;
+-#ifdef __ANDROID__
+-  data = memalign(gAlignment, nbytes);
++#ifdef USE_MIMALLOC
++  // Koharu: keep the Android build off the hardcoded memalign path. Upstream
++  // tests __ANDROID__ first, which makes -DUSE_MIMALLOC=ON a no-op there and
++  // would pair bionic's memalign with mi_free in free_cpu().
++  data = mi_malloc_aligned(nbytes, gAlignment);
+   CAFFE_ENFORCE(
+       data,
+       "DefaultCPUAllocator: not enough memory: you tried to allocate ",
+       nbytes,
+       " bytes.");
+-#elif defined(USE_MIMALLOC)
+-  data = mi_malloc_aligned(nbytes, gAlignment);
++#elif defined(__ANDROID__)
++  data = memalign(gAlignment, nbytes);
+   CAFFE_ENFORCE(
+       data,
+       "DefaultCPUAllocator: not enough memory: you tried to allocate ",

@@ -57,3 +57,8 @@ test-results/
 # Local documentation output
 /packages/docs/.mintlify/
 /packages/docs/site/
+
+# Local-only Android port notes: device, host paths, measurements
+/Android_build_plan.local.md
+# Local agent skills (device/host specific)
+/.agents/

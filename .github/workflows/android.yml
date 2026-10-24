@@ -53,21 +53,17 @@ jobs:
         working-directory: crates/koharu
         run: cargo tauri android init
       - name: Fetch the bundled native runtimes
-        # libtorch and llama.cpp are ~320 MB of prebuilt libraries and are not in
-        # git, so without them this job publishes an app shell that stops at the
-        # detection load. A release tagged `android-runtimes` carries the set;
-        # see "Building the Android runtimes" in Android_build_plan.md.
+        # A preview tag must ship a runnable APK, so its download is fatal. Branch
+        # and pull-request runs still need the compile check, so a missing asset
+        # only warns there.
         env:
           RUNTIMES_URL: https://github.com/${{ github.repository }}/releases/download/android-runtimes/android-runtimes-arm64-v8a.tar.gz
         run: |
-          dest=crates/koharu/gen/android/app/src/main/jniLibs/arm64-v8a
-          mkdir -p "$dest"
-          if curl -fsSL "$RUNTIMES_URL" -o "$RUNNER_TEMP/runtimes.tar.gz"; then
-            tar -xzf "$RUNNER_TEMP/runtimes.tar.gz" -C "$dest"
-            ls -l "$dest"
-          else
-            echo "::notice::no native runtime asset at $RUNTIMES_URL — publishing the app shell only"
+          require=
+          if [ "${{ github.ref_type }}" = tag ] && [[ "${{ github.ref_name }}" == android-m* ]]; then
+            require=--require
           fi
+          scripts/fetch-android-runtimes.sh crates/koharu/gen/android/app/src/main/jniLibs/arm64-v8a $require
       - name: Build the debug APK
         working-directory: crates/koharu
         run: cargo tauri android build --debug --target aarch64
@@ -177,6 +173,12 @@ jobs:
       - name: Generate the Android project
         working-directory: crates/koharu
         run: cargo tauri android init
+
+      - name: Fetch the bundled native runtimes
+        # A release AAB must ship libtorch and llama.cpp, so a missing asset is fatal.
+        env:
+          RUNTIMES_URL: https://github.com/${{ github.repository }}/releases/download/android-runtimes/android-runtimes-arm64-v8a.tar.gz
+        run: scripts/fetch-android-runtimes.sh crates/koharu/gen/android/app/src/main/jniLibs/arm64-v8a --require
 
       - name: Build the release AAB and APK
         working-directory: crates/koharu

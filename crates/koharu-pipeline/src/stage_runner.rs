@@ -119,6 +119,9 @@ impl StageRunner {
         // stage is mid-inference when its weights are dropped.
         if self.accelerator.evicts_between_stages() {
             self.stages.unload_except(job.stage);
+            // Dropping a stage frees multi-megabyte tensors; hand them back to
+            // the OS before the next stage allocates its own.
+            koharu_ml::release_freed_memory();
         }
         self.stages
             .load(job.stage)
