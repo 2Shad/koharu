@@ -20,6 +20,7 @@ import {
   selectableLayer,
   translateFrames,
 } from '@/lib/geometry'
+import { activatePage } from '@/lib/pageSelection'
 import {
   pageKey,
   pagesKey,
@@ -47,6 +48,7 @@ const BRUSH_DIAMETER_STEP = 4
 // trackpad on either platform keeps the exact desktop behavior.
 const TOUCH_SLOP = 8
 const LONG_PRESS_MS = 500
+const PAGE_SWIPE_DISTANCE = 64
 
 const canvasCursors = {
   select: undefined,
@@ -62,6 +64,7 @@ type Gesture =
   | { kind: 'pan'; pointer: number; start: Point; translation: [number, number] }
   | { kind: 'move'; pointer: number; start: Point; originals: TransformFrame[] }
   | { kind: 'text'; pointer: number; start: Point; frame: Frame }
+  | { kind: 'page'; pointer: number; startClientX: number; startClientY: number }
   | {
       kind: 'pinch'
       pointers: [number, number]
@@ -110,7 +113,12 @@ export function CanvasWorkspace() {
   const pointers = useRef(new Map<number, { clientX: number; clientY: number }>())
   const pendingTouch = useRef<PendingTouch | null>(null)
   const longPress = useRef<number | null>(null)
+  const pageContent = useRef<HTMLDivElement>(null)
+  const pageAnimation = useRef<Animation | null>(null)
+  const pageFollowOffset = useRef(0)
+  const pageEntryOffset = useRef<number | null>(null)
   const previousPageIndex = useRef<number | null>(null)
+  const previousPageId = useRef<string | null>(null)
   const spaceHeld = useRef(false)
   const transformActive = useRef(false)
   const transformRevision = useRef<number | null>(null)
@@ -147,6 +155,128 @@ export function CanvasWorkspace() {
     selected.length === 1
       ? page?.layers.find((layer) => layer.id === selected[0] && layer.type === 'raster')
       : undefined
+
+  // A swipe moves the page directly instead of waiting for the selected page to load. Direct
+  // style writes keep pointer movement off the React render path; the page-change entrance
+  // animation takes over only after the finger is released.
+  const pageContentWidth = useCallback((content: HTMLElement): number => {
+    const parent = content.parentElement
+    return Math.max(
+      1,
+      content.clientWidth ||
+        parent?.clientWidth ||
+        parent?.getBoundingClientRect().width ||
+        window.innerWidth,
+    )
+  }, [])
+
+  const clearPageFollow = useCallback(() => {
+    pageFollowOffset.current = 0
+    const content = pageContent.current
+    if (!content) return
+    content.style.transform = ''
+    content.style.opacity = ''
+    content.style.willChange = ''
+  }, [])
+
+  const followPage = useCallback(
+    (offset: number) => {
+      const content = pageContent.current
+      if (!content) return
+      pageAnimation.current?.cancel()
+      pageAnimation.current = null
+      const width = pageContentWidth(content)
+      const limit = width * 0.5
+      const clamped = Math.max(-limit, Math.min(limit, offset))
+      pageFollowOffset.current = clamped
+      content.style.transform = `translate3d(${clamped}px, 0, 0)`
+      content.style.opacity = `${1 - (Math.abs(clamped) / width) * 0.2}`
+      content.style.willChange = 'transform, opacity'
+    },
+    [pageContentWidth],
+  )
+
+  const settlePageFollow = useCallback(() => {
+    const content = pageContent.current
+    const offset = pageFollowOffset.current
+    if (!content || offset === 0) {
+      clearPageFollow()
+      return
+    }
+    pageAnimation.current?.cancel()
+    pageAnimation.current = null
+    if (
+      typeof content.animate !== 'function' ||
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
+      clearPageFollow()
+      return
+    }
+    const animation = content.animate(
+      [
+        {
+          opacity: Number(content.style.opacity || 1),
+          transform: `translate3d(${offset}px, 0, 0)`,
+        },
+        { opacity: 1, transform: 'translate3d(0, 0, 0)' },
+      ],
+      { duration: 180, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
+    )
+    pageAnimation.current = animation
+    pageFollowOffset.current = 0
+    animation.onfinish = () => {
+      if (pageAnimation.current !== animation) return
+      pageAnimation.current = null
+      clearPageFollow()
+    }
+  }, [clearPageFollow])
+
+  const navigatePage = useCallback(
+    (direction: -1 | 1): boolean => {
+      if (!pageId || !pages?.length) return false
+      const index = pages.findIndex((candidate) => candidate.id === pageId)
+      if (index < 0) return false
+      const target = pages[index + direction]
+      if (!target) return false
+      activatePage(target.id, [target.id])
+      return true
+    },
+    [pageId, pages],
+  )
+
+  const animatePageChange = useCallback(
+    (direction: -1 | 1) => {
+      const content = pageContent.current
+      const entryOffset = pageEntryOffset.current
+      pageEntryOffset.current = null
+      pageAnimation.current?.cancel()
+      pageAnimation.current = null
+      if (!content) return
+      const width = pageContentWidth(content)
+      clearPageFollow()
+      if (
+        typeof content.animate !== 'function' ||
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      )
+        return
+      const from =
+        entryOffset === null
+          ? direction * 26
+          : Math.max(-width * 0.5, Math.min(width * 0.5, -entryOffset))
+      const animation = content.animate(
+        [
+          { opacity: entryOffset === null ? 0.4 : 0.6, transform: `translate3d(${from}px, 0, 0)` },
+          { opacity: 1, transform: 'translate3d(0, 0, 0)' },
+        ],
+        { duration: 240, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
+      )
+      pageAnimation.current = animation
+      animation.onfinish = () => {
+        if (pageAnimation.current === animation) pageAnimation.current = null
+      }
+    },
+    [clearPageFollow, pageContentWidth],
+  )
 
   const enqueue = useCallback(<Result,>(operation: () => Promise<Result>): Promise<Result> => {
     const pending = commandQueue.current.then(operation)
@@ -238,6 +368,7 @@ export function CanvasWorkspace() {
     pointers.current.clear()
     const current = gesture.current
     gesture.current = null
+    if (current?.kind === 'page') clearPageFollow()
     if (current?.kind === 'paint' || current?.kind === 'erase' || current?.kind === 'inpaint') {
       strokeUpdates.clear()
       canvas?.cancelStroke()
@@ -250,7 +381,7 @@ export function CanvasWorkspace() {
     }
     setDraft(null)
     setPreviews({})
-  }, [canvas, strokeUpdates, transformUpdates])
+  }, [canvas, clearPageFollow, strokeUpdates, transformUpdates])
 
   const fitCanvas = useCallback(() => {
     const element = surface.current
@@ -334,7 +465,12 @@ export function CanvasWorkspace() {
     const index = pages.findIndex((candidate) => candidate.id === pageId)
     if (index < 0) return
     const previous = previousPageIndex.current
+    const previousId = previousPageId.current
     previousPageIndex.current = index
+    previousPageId.current = pageId
+    if (previousId !== null && previousId !== pageId) {
+      animatePageChange(previous !== null && index < previous ? -1 : 1)
+    }
     const direction = previous !== null && index < previous ? -1 : 1
     const adjacent = pages[index + direction]?.id ?? pages[index - direction]?.id
     if (adjacent) {
@@ -346,11 +482,21 @@ export function CanvasWorkspace() {
         })
         .catch(() => undefined)
     }
-  }, [canvasGeneration, canvasPage, canvasState.generation, canvasState.status, pageId, pages])
+  }, [
+    animatePageChange,
+    canvasGeneration,
+    canvasPage,
+    canvasState.generation,
+    canvasState.status,
+    pageId,
+    pages,
+  ])
 
   useEffect(() => {
     fitCanvas()
   }, [fitCanvas, fitCanvasRequest])
+
+  useEffect(() => () => pageAnimation.current?.cancel(), [])
 
   useEffect(() => cancelGesture, [cancelGesture, canvasGeneration, canvasRevision, page?.id, tool])
 
@@ -486,6 +632,11 @@ export function CanvasWorkspace() {
         dpr,
       )
       useKoharuStore.setState({ camera: { zoom, translation, fitted: false } })
+      return
+    }
+
+    if (current.kind === 'page') {
+      followPage(sample.clientX - current.startClientX)
       return
     }
 
@@ -710,6 +861,11 @@ export function CanvasWorkspace() {
   }
 
   const armTouch = (pointer: number, clientX: number, clientY: number) => {
+    if (pageFollowOffset.current !== 0 || pageAnimation.current) {
+      pageAnimation.current?.cancel()
+      pageAnimation.current = null
+      clearPageFollow()
+    }
     clearLongPress()
     pendingTouch.current = {
       pointer,
@@ -746,7 +902,11 @@ export function CanvasWorkspace() {
     if (!page || !canvas) return
     if (tool === 'select') {
       const target = hitTestLayers(page.layers, pending.start, layerFrames)
-      selectLayers(target ? [target.id] : [])
+      if (target) {
+        selectLayers([target.id])
+        return
+      }
+      if (!navigatePage(1)) selectLayers([])
       return
     }
     if (tool === 'text') {
@@ -901,14 +1061,27 @@ export function CanvasWorkspace() {
               }
               const pending = pendingTouch.current
               if (pending && pending.pointer === event.pointerId) {
-                if (
-                  Math.hypot(event.clientX - pending.clientX, event.clientY - pending.clientY) >
-                  TOUCH_SLOP
-                ) {
+                const dx = event.clientX - pending.clientX
+                const dy = event.clientY - pending.clientY
+                if (Math.hypot(dx, dy) > TOUCH_SLOP) {
                   clearLongPress()
                   pendingTouch.current = null
-                  beginGesture(pending.pointer, pending.start, pending.physical, false, false)
-                  moveGesture(event.pointerId, [{ clientX: event.clientX, clientY: event.clientY }])
+                  const emptySelect =
+                    tool === 'select' && !hitTestLayers(page.layers, pending.start, layerFrames)
+                  if (emptySelect) {
+                    gesture.current = {
+                      kind: 'page',
+                      pointer: pending.pointer,
+                      startClientX: pending.clientX,
+                      startClientY: pending.clientY,
+                    }
+                    followPage(dx)
+                  } else {
+                    beginGesture(pending.pointer, pending.start, pending.physical, false, false)
+                    moveGesture(event.pointerId, [
+                      { clientX: event.clientX, clientY: event.clientY },
+                    ])
+                  }
                 }
                 return
               }
@@ -934,6 +1107,23 @@ export function CanvasWorkspace() {
                 pendingTouch.current = null
                 clearLongPress()
                 tapGesture(pending)
+                release()
+                return
+              }
+              const current = gesture.current
+              if (current?.kind === 'page') {
+                gesture.current = null
+                const dx = event.clientX - current.startClientX
+                const dy = event.clientY - current.startClientY
+                if (Math.abs(dx) >= PAGE_SWIPE_DISTANCE && Math.abs(dx) > Math.abs(dy) * 1.5) {
+                  if (navigatePage(dx < 0 ? 1 : -1)) {
+                    pageEntryOffset.current = pageFollowOffset.current
+                  } else {
+                    settlePageFollow()
+                  }
+                } else {
+                  settlePageFollow()
+                }
                 release()
                 return
               }
@@ -1003,28 +1193,30 @@ export function CanvasWorkspace() {
             useKoharuStore.setState({ camera: { zoom, translation, fitted: false } })
           }}
         >
-          <canvas
-            ref={setCanvasElement}
-            data-testid='webgpu-canvas'
-            aria-hidden
-            className='pointer-events-none absolute inset-0 block size-full'
-          />
-          {page && canvasState.status === 'ready' && (
-            <CanvasOverlay
-              page={page}
-              selected={selected}
-              hovered={hovered}
-              frames={layerFrames}
-              previews={previews}
-              draft={draft}
-              cursor={cursor}
-              brushSize={brush.diameter}
-              showBrushCursor={isBrushTool(tool)}
-              onTransformStart={beginTransform}
-              onTransformFrame={updateTransform}
-              onTransformEnd={finishTransform}
+          <div ref={pageContent} data-testid='canvas-page-content' className='absolute inset-0'>
+            <canvas
+              ref={setCanvasElement}
+              data-testid='webgpu-canvas'
+              aria-hidden
+              className='pointer-events-none absolute inset-0 block size-full'
             />
-          )}
+            {page && canvasState.status === 'ready' && (
+              <CanvasOverlay
+                page={page}
+                selected={selected}
+                hovered={hovered}
+                frames={layerFrames}
+                previews={previews}
+                draft={draft}
+                cursor={cursor}
+                brushSize={brush.diameter}
+                showBrushCursor={isBrushTool(tool)}
+                onTransformStart={beginTransform}
+                onTransformFrame={updateTransform}
+                onTransformEnd={finishTransform}
+              />
+            )}
+          </div>
           {page && canvasState.status === 'error' && (
             <div
               role='alert'

@@ -13,17 +13,13 @@ import {
   Settings,
   Trash2,
 } from 'lucide-react'
-import {
-  type PointerEvent as ReactPointerEvent,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react'
+import { type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 
 import { ResourceMonitor } from '@/components/editor/ResourceMonitor'
 import { call } from '@/lib/backend'
+import { activatePage, cancelPageSelection } from '@/lib/pageSelection'
 import {
   pageKey,
   pagesKey,
@@ -36,11 +32,10 @@ import {
   usePages,
 } from '@/lib/queries'
 import { useKoharuStore } from '@/lib/store'
-import { prefetchCanvasPages, showCanvasPage } from '@koharu/bridge/canvas'
+import { prefetchCanvasPages } from '@koharu/bridge/canvas'
 import {
   commands,
   type CanvasPagePreparation,
-  type Page,
   type PageImportSource,
   type PageSummary,
   type ProjectInfo,
@@ -75,11 +70,35 @@ interface IntentPrefetchState {
 }
 
 // Pointer-based reorder state. HTML5 drag events are unreliable on touch, so a
-// finger drags from the handle and the row under the pointer becomes the target.
+// finger holds the handle before dragging; the row under the pointer becomes the
+// target. The hold keeps a scroll flick from being read as a reorder.
 interface ReorderState {
   id: string
   from: number
   over: number
+}
+
+interface DragPreviewState {
+  page: string
+  top: number
+  left: number
+  width: number
+  dropping: boolean
+}
+
+const pageRowHeight = 64
+const pageRowStep = pageRowHeight + 2
+const reorderHoldMs = 350
+const reorderSlop = 8
+
+function reorderShift(reorder: ReorderState, index: number) {
+  if (reorder.over > reorder.from && index > reorder.from && index <= reorder.over) {
+    return -pageRowStep
+  }
+  if (reorder.over < reorder.from && index >= reorder.over && index < reorder.from) {
+    return pageRowStep
+  }
+  return 0
 }
 
 export function PageRail() {
@@ -94,9 +113,12 @@ export function PageRail() {
   const setSettingsOpen = useKoharuStore((state) => state.setSettingsOpen)
   const { importPages, importing } = useImportPages()
   const anchor = useRef<number | null>(null)
-  const selectionRequest = useRef(0)
   const intentPrefetch = useRef<IntentPrefetchState | null>(null)
   const reorderRef = useRef<ReorderState | null>(null)
+  const reorderHold = useRef<number | null>(null)
+  const reorderGrab = useRef(0)
+  const reorderPress = useRef<{ x: number; y: number } | null>(null)
+  const [dragPreview, setDragPreview] = useState<DragPreviewState | null>(null)
   const [dragged, setDragged] = useState<string | null>(null)
   const [multiSelect, setMultiSelect] = useState(false)
   const [reorder, setReorder] = useState<ReorderState | null>(null)
@@ -116,7 +138,7 @@ export function PageRail() {
     count: visiblePages.length,
     getScrollElement: () => pageList.current,
     getItemKey: (index) => visiblePages[index]?.page.id ?? index,
-    estimateSize: () => 72,
+    estimateSize: () => pageRowHeight,
     gap: 2,
     overscan: 6,
     initialRect: { width: 240, height: 600 },
@@ -126,9 +148,11 @@ export function PageRail() {
       ),
   })
 
+  useEffect(() => cancelPageSelection, [])
+
   useEffect(
     () => () => {
-      selectionRequest.current += 1
+      if (reorderHold.current !== null) window.clearTimeout(reorderHold.current)
     },
     [],
   )
@@ -151,38 +175,7 @@ export function PageRail() {
       next = [page.id]
       anchor.current = index
     }
-    const previousProject = queryClient.getQueryData<ProjectInfo | null>(projectKey)
-    const previousPage = queryClient.getQueryData<Page | null>(pageKey)
-    const prepared = queryClient.getQueryData<CanvasPagePreparation>(preparedPageKey(page.id))
-    const activated = showCanvasPage(page.id, previousProject?.revision ?? null)
-    const request = ++selectionRequest.current
-    const synchronize = () => {
-      if (selectionRequest.current !== request) return
-      if (activated && previousProject && prepared?.revision === previousProject.revision) {
-        queryClient.setQueryData(projectKey, { ...previousProject, active_page: page.id })
-        queryClient.setQueryData(pageKey, prepared.page)
-      }
-      selectPages(next)
-      selectLayers([])
-      void call(commands.selectPage, page.id)
-        .then((selection) => {
-          if (selectionRequest.current !== request) return
-          queryClient.setQueryData(projectKey, selection.project)
-          queryClient.setQueryData(pageKey, selection.page)
-        })
-        .catch(() => {
-          if (selectionRequest.current !== request) return
-          if (queryClient.getQueryData<ProjectInfo | null>(projectKey)?.active_page === page.id) {
-            queryClient.setQueryData(projectKey, previousProject)
-            queryClient.setQueryData(pageKey, previousPage)
-          }
-        })
-    }
-    if (activated) {
-      requestAnimationFrame(() => window.setTimeout(synchronize, 0))
-    } else {
-      synchronize()
-    }
+    activatePage(page.id, next)
   }
 
   const prefetchOnIntent = (page: string) => {
@@ -222,21 +215,61 @@ export function PageRail() {
     setReorder(value)
   }
 
-  const startReorder = (
-    event: ReactPointerEvent<HTMLButtonElement>,
-    id: string,
-    index: number,
-  ) => {
-    if (!mobile) return
+  const clearReorderHold = () => {
+    if (reorderHold.current !== null) {
+      window.clearTimeout(reorderHold.current)
+      reorderHold.current = null
+    }
+    reorderPress.current = null
+  }
+
+  const startReorder = (event: ReactPointerEvent<HTMLButtonElement>, id: string, index: number) => {
+    if (!mobile || reorderRef.current) return
     event.preventDefault()
     event.currentTarget.setPointerCapture(event.pointerId)
-    setDragged(id)
-    updateReorder({ id, from: index, over: index })
+    clearReorderHold()
+    const press = { x: event.clientX, y: event.clientY }
+    const rect = event.currentTarget
+      .closest<HTMLElement>('[data-page-index]')
+      ?.getBoundingClientRect()
+    reorderPress.current = press
+    reorderHold.current = window.setTimeout(() => {
+      reorderHold.current = null
+      reorderPress.current = null
+      // Vibration is best-effort; the lifted row is the visible feedback.
+      try {
+        navigator.vibrate?.(12)
+      } catch {
+        // The handle still works when the platform blocks vibration.
+      }
+      if (rect) {
+        reorderGrab.current = press.y - rect.top
+        setDragPreview({
+          page: id,
+          top: rect.top,
+          left: rect.left,
+          width: rect.width,
+          dropping: false,
+        })
+      }
+      setDragged(id)
+      updateReorder({ id, from: index, over: index })
+    }, reorderHoldMs)
   }
 
   const moveReorder = (event: ReactPointerEvent<HTMLButtonElement>) => {
     const current = reorderRef.current
-    if (!current) return
+    if (!current) {
+      const press = reorderPress.current
+      if (!press) return
+      if (Math.hypot(event.clientX - press.x, event.clientY - press.y) > reorderSlop) {
+        clearReorderHold()
+      }
+      return
+    }
+    setDragPreview((preview) =>
+      preview ? { ...preview, top: event.clientY - reorderGrab.current } : preview,
+    )
     const row = document
       .elementFromPoint(event.clientX, event.clientY)
       ?.closest<HTMLElement>('[data-page-index]')
@@ -245,19 +278,44 @@ export function PageRail() {
     updateReorder({ ...current, over })
   }
 
-  const endReorder = () => {
-    const current = reorderRef.current
+  const clearReorderVisuals = () => {
     updateReorder(null)
     setDragged(null)
-    if (!current || current.over === current.from) return
+    setDragPreview(null)
+  }
+
+  const endReorder = () => {
+    clearReorderHold()
+    const current = reorderRef.current
+    if (!current || current.over === current.from) {
+      clearReorderVisuals()
+      return
+    }
+    const slot = document.querySelector<HTMLElement>('[data-reorder-slot]')
+    setDragPreview((preview) =>
+      preview
+        ? {
+            ...preview,
+            dropping: true,
+            top: slot?.getBoundingClientRect().top ?? preview.top,
+          }
+        : preview,
+    )
+    const settle = new Promise<void>((resolve) => window.setTimeout(resolve, 220))
     void call(commands.movePage, current.id, current.over)
-      .then(() => refresh(projectKey, pagesKey))
       .catch(() => undefined)
+      .then(async () => {
+        // Let the preview settle into the open slot before the list changes order.
+        await settle
+        await refresh(projectKey, pagesKey)
+      })
+      .catch(() => undefined)
+      .finally(clearReorderVisuals)
   }
 
   const cancelReorder = () => {
-    updateReorder(null)
-    setDragged(null)
+    clearReorderHold()
+    clearReorderVisuals()
   }
 
   const deletePage = (page: string) =>
@@ -291,6 +349,13 @@ export function PageRail() {
       .catch(() => undefined)
       .finally(closeRename)
   }
+
+  const virtualItems = pageVirtualizer.getVirtualItems()
+  const reorderSlotStart = reorder
+    ? virtualItems.find((virtualRow) => visiblePages[virtualRow.index]?.index === reorder.over)
+        ?.start
+    : undefined
+  const dragPage = dragPreview ? pages.find((page) => page.id === dragPreview.page) : undefined
 
   return (
     <>
@@ -370,22 +435,39 @@ export function PageRail() {
           </div>
         ) : (
           <ScrollArea
-            className='min-h-0 flex-1'
-            viewportClassName='px-1.5 py-1.5'
+            className='flex min-h-0 flex-1 flex-col'
+            viewportClassName='min-h-0 flex-1 px-1.5 py-1.5'
             viewportRef={pageList}
           >
             <div className='relative w-full' style={{ height: pageVirtualizer.getTotalSize() }}>
-              {pageVirtualizer.getVirtualItems().map((virtualRow) => {
+              {reorderSlotStart !== undefined && (
+                <div
+                  data-reorder-slot
+                  aria-hidden
+                  className='pointer-events-none absolute top-0 left-0 w-full rounded-xl border border-dashed border-primary/45 bg-primary/[0.055] transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]'
+                  style={{
+                    height: pageRowHeight,
+                    transform: `translateY(${reorderSlotStart}px)`,
+                  }}
+                />
+              )}
+              {virtualItems.map((virtualRow) => {
                 const item = visiblePages[virtualRow.index]
                 if (!item) return null
                 const { page, index } = item
+                const shift = reorder ? reorderShift(reorder, index) : 0
                 return (
                   <div
                     key={virtualRow.key}
+                    ref={pageVirtualizer.measureElement}
                     data-index={virtualRow.index}
                     data-page-index={index}
-                    className='absolute top-0 left-0 w-full'
-                    style={{ transform: `translateY(${virtualRow.start}px)` }}
+                    className={cn(
+                      'absolute top-0 left-0 w-full',
+                      reorder &&
+                        'transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform',
+                    )}
+                    style={{ transform: `translateY(${virtualRow.start + shift}px)` }}
                   >
                     <PageItem
                       page={page}
@@ -394,7 +476,6 @@ export function PageRail() {
                       active={active === page.id}
                       selected={selected.includes(page.id)}
                       dragged={dragged === page.id}
-                      dropTarget={reorder !== null && reorder.over === index && reorder.id !== page.id}
                       onIntent={active === page.id ? undefined : () => prefetchOnIntent(page.id)}
                       onSelect={(additive, range) => select(index, additive, range)}
                       onDragStart={() => setDragged(page.id)}
@@ -481,6 +562,10 @@ export function PageRail() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {dragPreview && dragPage
+        ? createPortal(<PageDragPreview page={dragPage} preview={dragPreview} />, document.body)
+        : null}
     </>
   )
 }
@@ -547,6 +632,54 @@ function PageImportMenu({
   )
 }
 
+function PageDragPreview({ page, preview }: { page: PageSummary; preview: DragPreviewState }) {
+  const { t } = useTranslation()
+  const [entered, setEntered] = useState(false)
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setEntered(true))
+    return () => window.cancelAnimationFrame(frame)
+  }, [])
+
+  return (
+    <div
+      className={cn(
+        'pointer-events-none fixed top-0 left-0 z-[120] will-change-transform',
+        preview.dropping && 'transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]',
+      )}
+      style={{
+        width: preview.width,
+        transform: `translate3d(${preview.left}px, ${preview.top}px, 0)`,
+      }}
+    >
+      <div
+        className={cn(
+          'grid h-16 grid-cols-[48px_minmax(0,1fr)_44px] items-center gap-2 rounded-xl border border-primary/35 bg-[var(--surface-floating)] px-1.5 shadow-[0_24px_50px_-16px_rgba(0,0,0,0.95)] ring-1 ring-primary/20 transition-[transform,opacity] duration-200 ease-out',
+          entered && !preview.dropping ? 'scale-[1.035] opacity-100' : 'scale-100 opacity-0',
+        )}
+      >
+        <div className='grid h-16 w-12 place-items-center overflow-hidden rounded-lg bg-[var(--surface-well)]'>
+          {page.source_asset ? (
+            <PageThumbnail page={page.id} asset={page.source_asset} label={page.label} />
+          ) : (
+            <span className='text-[9px] text-muted-foreground'>{t('navigator.noImage')}</span>
+          )}
+        </div>
+        <div className='min-w-0'>
+          <span className='block truncate text-[11px] font-medium'>{page.label}</span>
+          <p className='mt-0.5 truncate text-[9px] leading-3 text-muted-foreground tabular-nums'>
+            {t('navigator.layerCount', { count: page.layer_count })} · {page.size.width} ×{' '}
+            {page.size.height}
+          </p>
+        </div>
+        <span className='grid h-16 w-11 place-items-center rounded-lg bg-primary/15 text-primary'>
+          <GripVertical className='size-4' />
+        </span>
+      </div>
+    </div>
+  )
+}
+
 function PageItem({
   page,
   mobile,
@@ -554,7 +687,6 @@ function PageItem({
   active,
   selected,
   dragged,
-  dropTarget,
   onIntent,
   onSelect,
   onDragStart,
@@ -573,7 +705,6 @@ function PageItem({
   active: boolean
   selected: boolean
   dragged: boolean
-  dropTarget: boolean
   onIntent?: () => void
   onSelect: (additive: boolean, range: boolean) => void
   onDragStart: () => void
@@ -593,16 +724,18 @@ function PageItem({
       draggable={!mobile}
       data-active={active}
       data-selected={selected}
-      data-drop-target={dropTarget || undefined}
       className={cn(
-        'group grid cursor-default grid-cols-[48px_minmax(0,1fr)] gap-2.5 rounded-xl p-1.5 transition-colors select-none',
-        active
-          ? 'bg-primary/[0.09] hover:bg-primary/[0.09]'
-          : selected
-            ? 'bg-foreground/[0.06] hover:bg-foreground/[0.08]'
-            : 'hover:bg-foreground/[0.045]',
-        dragged && 'opacity-50',
-        dropTarget && 'ring-2 ring-primary/60',
+        'group grid h-16 cursor-default grid-cols-[48px_minmax(0,1fr)] items-center gap-2 rounded-xl px-1.5 transition-[background-color,box-shadow,transform,opacity] select-none md:gap-2.5',
+        mobile && 'grid-cols-[48px_minmax(0,1fr)_44px]',
+        dragged
+          ? mobile
+            ? 'opacity-0'
+            : 'scale-[0.985] bg-primary/[0.12] opacity-90 shadow-lg ring-1 ring-primary/40'
+          : active
+            ? 'bg-primary/[0.09] hover:bg-primary/[0.09]'
+            : selected
+              ? 'bg-foreground/[0.06] hover:bg-foreground/[0.08]'
+              : 'hover:bg-foreground/[0.045]',
       )}
       onPointerEnter={onIntent}
       onFocus={onIntent}
@@ -626,62 +759,64 @@ function PageItem({
           <span className='text-[9px] text-muted-foreground'>{t('navigator.noImage')}</span>
         )}
       </div>
-      <div className='min-w-0 py-0.5'>
-        <div className='flex items-start gap-1'>
-          <span className='min-w-0 flex-1 truncate text-[10px] font-medium'>{page.label}</span>
-          {mobile && (
-            <button
-              type='button'
-              aria-label={t('navigator.reorder', { page: page.label })}
-              className='grid size-11 shrink-0 touch-none place-items-center rounded-md text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground'
-              onPointerDown={onReorderStart}
-              onPointerMove={onReorderMove}
-              onPointerUp={onReorderEnd}
-              onPointerCancel={onReorderCancel}
-            >
-              <GripVertical className='size-4' />
-            </button>
-          )}
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  variant='ghost'
-                  size='icon-xs'
-                  aria-label={t('navigator.actionsFor', { page: page.label })}
-                  className={cn(
-                    'shrink-0 shadow-none',
-                    mobile
-                      ? 'size-11'
-                      : '-mt-1 opacity-0 group-hover:opacity-100 aria-expanded:opacity-100',
-                  )}
-                />
-              }
-            >
-              <MoreHorizontal />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align='end'>
-              <DropdownMenuItem className={cn(mobile && 'min-h-11')} onClick={onRename}>
-                {t('navigator.rename')}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                variant='destructive'
-                className={cn(mobile && 'min-h-11')}
-                onClick={onDelete}
-              >
-                <Trash2 /> {t('navigator.delete')}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-        <p className='mt-1 text-[9px] leading-3.5 text-muted-foreground'>
-          {t('navigator.layerCount', { count: page.layer_count })}
+      <div className='relative min-w-0 pr-11 md:pr-7'>
+        <span className='block truncate text-[11px] font-medium'>{page.label}</span>
+        <p className='mt-0.5 truncate text-[9px] leading-3 text-muted-foreground tabular-nums'>
+          {t('navigator.layerCount', { count: page.layer_count })} · {page.size.width} ×{' '}
+          {page.size.height}
         </p>
-        <p className='mt-1 text-[9px] text-muted-foreground tabular-nums'>
-          {page.size.width} × {page.size.height}
-        </p>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant='ghost'
+                size='icon-xs'
+                aria-label={t('navigator.actionsFor', { page: page.label })}
+                className={cn(
+                  'absolute top-1/2 right-0 -translate-y-1/2 shadow-none',
+                  mobile
+                    ? 'size-11'
+                    : 'size-7 opacity-0 group-hover:opacity-100 aria-expanded:opacity-100',
+                )}
+              />
+            }
+          >
+            <MoreHorizontal />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align='end'>
+            <DropdownMenuItem className={cn(mobile && 'min-h-11')} onClick={onRename}>
+              {t('navigator.rename')}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              variant='destructive'
+              className={cn(mobile && 'min-h-11')}
+              onClick={onDelete}
+            >
+              <Trash2 /> {t('navigator.delete')}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
+      {mobile && (
+        <button
+          type='button'
+          aria-label={t('navigator.reorder', { page: page.label })}
+          className={cn(
+            'grid h-16 w-11 touch-none place-items-center rounded-lg text-muted-foreground transition-colors',
+            dragged
+              ? 'bg-primary/15 text-primary'
+              : 'active:bg-foreground/[0.06] active:text-foreground',
+          )}
+          onPointerDown={onReorderStart}
+          onPointerMove={onReorderMove}
+          onPointerUp={onReorderEnd}
+          onPointerCancel={onReorderCancel}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <GripVertical className='size-4' />
+        </button>
+      )}
     </article>
   )
 }

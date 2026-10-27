@@ -44,6 +44,7 @@ vi.mock('@/components/editor/useCanvas', () => ({
 }))
 vi.mock('@koharu/bridge/canvas', () => ({
   prefetchCanvasPages,
+  showCanvasPage: () => false,
   workspaceColor: () => [245, 245, 245],
 }))
 
@@ -162,6 +163,145 @@ describe('canvas interaction adapter', () => {
 
     act(() => useKoharuStore.setState({ canvasPage: 'page' }))
     await waitFor(() => expect(prefetchCanvasPages).toHaveBeenCalledWith(['next']))
+  })
+
+  it('turns to the next page on a horizontal swipe over empty canvas', async () => {
+    installProject()
+    queryClient.setQueryData(pagesKey, [
+      {
+        id: 'page',
+        label: 'Page',
+        size: { width: 1000, height: 1000 },
+        source_asset: null,
+        layer_count: 1,
+      },
+      {
+        id: 'next',
+        label: 'Next',
+        size: { width: 1000, height: 1000 },
+        source_asset: null,
+        layer_count: 1,
+      },
+    ])
+    const selectPage = vi
+      .spyOn(commands, 'selectPage')
+      .mockImplementation(() => new Promise(() => {}))
+    const surface = renderWorkspace()
+
+    fireEvent.pointerDown(surface, {
+      button: 0,
+      pointerId: 7,
+      pointerType: 'touch',
+      clientX: 400,
+      clientY: 300,
+    })
+    fireEvent.pointerMove(surface, {
+      pointerId: 7,
+      pointerType: 'touch',
+      clientX: 300,
+      clientY: 300,
+    })
+    expect(screen.getByTestId('canvas-page-content').style.transform).toBe(
+      'translate3d(-100px, 0, 0)',
+    )
+    fireEvent.pointerUp(surface, {
+      pointerId: 7,
+      pointerType: 'touch',
+      clientX: 300,
+      clientY: 300,
+    })
+
+    await waitFor(() => expect(selectPage).toHaveBeenCalledWith('next'))
+  })
+
+  it('snaps a short swipe back without turning the page', async () => {
+    installProject()
+    queryClient.setQueryData(pagesKey, [
+      {
+        id: 'page',
+        label: 'Page',
+        size: { width: 1000, height: 1000 },
+        source_asset: null,
+        layer_count: 1,
+      },
+      {
+        id: 'next',
+        label: 'Next',
+        size: { width: 1000, height: 1000 },
+        source_asset: null,
+        layer_count: 1,
+      },
+    ])
+    const selectPage = vi
+      .spyOn(commands, 'selectPage')
+      .mockImplementation(() => new Promise(() => {}))
+    const surface = renderWorkspace()
+
+    fireEvent.pointerDown(surface, {
+      button: 0,
+      pointerId: 9,
+      pointerType: 'touch',
+      clientX: 400,
+      clientY: 300,
+    })
+    fireEvent.pointerMove(surface, {
+      pointerId: 9,
+      pointerType: 'touch',
+      clientX: 360,
+      clientY: 300,
+    })
+    expect(screen.getByTestId('canvas-page-content').style.transform).toBe(
+      'translate3d(-40px, 0, 0)',
+    )
+    fireEvent.pointerUp(surface, {
+      pointerId: 9,
+      pointerType: 'touch',
+      clientX: 360,
+      clientY: 300,
+    })
+
+    await waitFor(() => expect(screen.getByTestId('canvas-page-content').style.transform).toBe(''))
+    expect(selectPage).not.toHaveBeenCalled()
+  })
+
+  it('turns to the next page on a tap over empty canvas', async () => {
+    installProject()
+    queryClient.setQueryData(pagesKey, [
+      {
+        id: 'page',
+        label: 'Page',
+        size: { width: 1000, height: 1000 },
+        source_asset: null,
+        layer_count: 1,
+      },
+      {
+        id: 'next',
+        label: 'Next',
+        size: { width: 1000, height: 1000 },
+        source_asset: null,
+        layer_count: 1,
+      },
+    ])
+    const selectPage = vi
+      .spyOn(commands, 'selectPage')
+      .mockImplementation(() => new Promise(() => {}))
+    const surface = renderWorkspace()
+
+    fireEvent.pointerDown(surface, {
+      button: 0,
+      pointerId: 8,
+      pointerType: 'touch',
+      clientX: 400,
+      clientY: 300,
+    })
+    fireEvent.pointerUp(surface, {
+      pointerId: 8,
+      pointerType: 'touch',
+      clientX: 400,
+      clientY: 300,
+    })
+
+    await waitFor(() => expect(selectPage).toHaveBeenCalledWith('next'))
   })
 
   it('renders an accessible browser canvas and keeps camera updates local', async () => {
