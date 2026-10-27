@@ -52,6 +52,10 @@ jobs:
       - name: Generate the Android project
         working-directory: crates/koharu
         run: cargo tauri android init
+      - name: Generate the app icons
+        # The manifest supplies a foreground inset for the adaptive-icon safe zone.
+        working-directory: crates/koharu
+        run: cargo tauri icon icons/icon.json
       - name: Fetch the bundled native runtimes
         # A preview tag must ship a runnable APK, so its download is fatal. Branch
         # and pull-request runs still need the compile check, so a missing asset
@@ -173,6 +177,9 @@ jobs:
       - name: Generate the Android project
         working-directory: crates/koharu
         run: cargo tauri android init
+      - name: Generate the app icons
+        working-directory: crates/koharu
+        run: cargo tauri icon icons/icon.json
 
       - name: Fetch the bundled native runtimes
         # A release AAB must ship libtorch and llama.cpp, so a missing asset is fatal.
