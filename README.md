@@ -1,224 +1,141 @@
-<h1 align="center">Koharu</h1>
+<h1 align="center">
+  <img src="crates/koharu/icons/icon.png" width="96" alt="Koharu icon">
+  <br>
+  Koharu Android
+</h1>
 
-<p align="center">ML-powered manga translator, written in <b>Rust</b>.</p>
+<p align="center">On-device ML manga translation for Android.</p>
 
 <p align="center">
-<a href="https://github.com/koharu-rs/koharu/releases/latest" target="_blank"><img alt="GitHub Downloads (all assets, all releases)" src="https://img.shields.io/github/downloads/koharu-rs/koharu/total?style=for-the-badge&link=https%3A%2F%2Fgithub.com%2Fkoharu-rs%2Fkoharu%2Freleases%2Flatest"></a>
+  <a href="https://github.com/2Shad/koharu/releases"><img alt="Android alpha release" src="https://img.shields.io/github/v/release/2Shad/koharu?include_prereleases&label=Android%20alpha&style=for-the-badge"></a>
+  <img alt="Android 12+" src="https://img.shields.io/badge/Android-12%2B-3DDC84?logo=android&logoColor=white&style=for-the-badge">
+  <img alt="arm64-v8a" src="https://img.shields.io/badge/arch-arm64--v8a-blue?style=for-the-badge">
 </p>
 
 <p align="center">
-<a href="https://trendshift.io/repositories/20649" target="_blank"><img src="https://trendshift.io/api/badge/repositories/20649" alt="koharu-rs%2Fkoharu | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+  <a href="#install">Install</a> ·
+  <a href="#build-from-source">Build</a> ·
+  <a href="Android_build_plan.md">Build plan</a> ·
+  <a href="https://github.com/koharu-rs/koharu">Desktop app</a>
 </p>
 
-<p align="center">
-<a href="https://koharu.rs/installation" target="_blank">Getting Started</a> · <a href="https://koharu.rs/" target="_blank">Docs</a> · <a href="https://github.com/koharu-rs/koharu/issues" target="_blank">Bug reports</a> · <a href="https://discord.gg/mHvHkxGnUY" target="_blank">Discord</a>
-</p>
-
-<p align="center">
-<a href="https://koharu.rs/ja" target="_blank">日本語</a> | <a href="https://koharu.rs/zh" target="_blank">简体中文</a>
-</p>
-
-Koharu introduces a local-first workflow for manga translation, utilizing the power of ML to automate the process. It combines the capabilities of object detection, OCR, inpainting, and LLMs to create a seamless translation experience.
+**Koharu Android** is the Android port of [Koharu](https://github.com/koharu-rs/koharu), an ML-powered manga translator. It runs the translation pipeline directly on the phone: text detection, OCR, translation, inpainting, and typesetting. The desktop application lives on [`main`](https://github.com/2Shad/koharu/tree/main) and in the upstream [koharu-rs/koharu](https://github.com/koharu-rs/koharu) repository.
 
 > [!NOTE]
-> Koharu runs its vision models and LLMs **locally** on your machine to keep your data private and secure.
+> This is an alpha port. The desktop app remains the reference implementation, and Android-specific behavior may still differ from it.
 
----
+## What works
 
-![screenshot](packages/docs/screenshot.png)
+- Full on-device pipeline: detection → OCR → translation → inpainting → typesetting.
+- Local translation through llama.cpp, with quantized model profiles selected from the device's RAM class.
+- Local detection and OCR, including MangaOCR and PaddleOCR-VL profiles.
+- AOT inpainting on device.
+- Multi-page projects, a touch-first canvas, page swiping, and hold-to-reorder pages.
+- Background processing through an Android foreground service.
+- The same project format and Rust pipeline as the desktop app.
 
-> [!NOTE]
-> Join our [Discord server](https://discord.gg/mHvHkxGnUY) for support and discussion.
+Inference is local by default. Downloaded models stay on the device; there is no companion desktop process or remote inference server.
 
-## Features
+## Requirements
 
-- [Multi-format project management](https://koharu.rs/guides/projects) for raster images, archives, and PDFs with page sequencing
-- [Selective pipeline](https://koharu.rs/guides/processing) for detection, OCR, translation, and inpainting at page or project scope
-- [Detection and segmentation](https://koharu.rs/guides/processing) for text regions, speech bubbles, and cleanup regions
-- [Multimodal OCR](https://koharu.rs/models/vision) for dialogue, captions, and general page text
-- [Local GGUF inference and hosted providers](https://koharu.rs/models/providers) for LLM and machine-translation workflows
-- [Generative inpainting](https://koharu.rs/guides/cleanup) for source-text removal and artwork reconstruction
-- [Proofreading](https://koharu.rs/guides/review) for correcting OCR and translation output
-- [WebGPU-based canvas](https://koharu.rs/guides/canvas) for manual cleanup, text placement, and page composition
-- [Multilingual text shaping and layout](https://koharu.rs/guides/typesetting) with automatic fitting, font fallback, vertical CJK, and right-to-left text
-- [Layered PSD export](https://koharu.rs/guides/export) for flattened delivery and layered editing
-- [Agent-based workflow](https://koharu.rs/agent/projects) for project inspection, editing, and pipeline control
+- Android 12 or newer (API 31)
+- `arm64-v8a`
+- 8 GB of RAM or more recommended. Devices with 6–8 GB use the smaller translation profile.
+- Several GB of free storage for the app, its native runtimes, and models.
 
-## Hardware Acceleration
+The APK is large because the llama.cpp and libtorch runtimes are bundled rather than downloaded separately.
 
-Koharu supports CUDA and ROCm / HIP on Windows and Linux, Metal on Apple silicon, and Vulkan on Windows and Linux. Keep your graphics driver current; a full CUDA or ROCm SDK installation is not required. See [Runtime and hardware requirements](https://koharu.rs/hardware) for model-specific guidance.
+## Install
 
-### CUDA
+Download the latest Android alpha or preview from the [releases page](https://github.com/2Shad/koharu/releases), then install it:
 
-CUDA 13.3 requires an NVIDIA Turing-class or newer GPU and an R610 or newer driver. Check NVIDIA's official [CUDA toolkit, driver, and architecture matrix](https://docs.nvidia.com/datacenter/tesla/drivers/cuda-toolkit-driver-and-architecture-matrix.html) and install the [latest NVIDIA driver](https://www.nvidia.com/en-us/drivers/).
-
-### ROCm / HIP
-
-ROCm 10.0 support depends on the exact AMD GPU, operating system, and driver combination. Check AMD's official [ROCm 10.0.0 compatibility matrix](https://rocm.docs.amd.com/en/docs-10.0.0/compatibility/compatibility-matrix.html) and install a compatible [AMD driver](https://www.amd.com/en/support).
-
-### Metal
-
-Metal is available on Apple silicon Macs.
-
-### Vulkan
-
-Vulkan is available on Windows and Linux as an alternative to CUDA and ROCm / HIP.
-
-### WebGPU
-
-The editor canvas uses WebGPU and requires a current graphics driver even when inference runs on the CPU.
-
-### CPU
-
-CPU inference is available for supported workloads but is substantially slower.
-
-## Machine Learning Models
-
-Koharu uses separate models for detection, OCR, inpainting, and translation. [Vision and inpainting](https://koharu.rs/models/vision) and [translation and generation](https://koharu.rs/models/translation) have separate model settings.
-
-### Computer Vision Models
-
-Detection, OCR, and inpainting models are selected separately.
-
-#### Detection and Layout
-
-The detection model finds text regions, speech bubbles, and segmentation masks.
-
-- [Koharu Layout RF-DETR Seg 2XL](https://huggingface.co/mayocream/koharu-layout-rfdetr-seg-2xl-1152)
-
-#### OCR
-
-OCR reads source text from detected regions.
-
-- [PaddleOCR VL 1.6](https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6)
-- [Manga OCR](https://huggingface.co/mayocream/manga-ocr)
-- [Baberu OCR](https://huggingface.co/genshiai-daichi/baberu-ocr)
-- [Hayai OCR](https://huggingface.co/JustANormalTinkerer/hayai-ocr-v2)
-
-#### Inpainting
-
-Inpainting reconstructs the image behind source text before the translation is rendered.
-
-- [FLUX.2 Klein](https://huggingface.co/unsloth/FLUX.2-klein-4B-GGUF)
-- [RORem mixed](https://huggingface.co/mayocream/RORem-mixed-GGUF)
-- [LaMa](https://huggingface.co/mayocream/lama-manga)
-- [AOT GAN](https://huggingface.co/mayocream/aot-inpainting)
-
-### Large Language Models
-
-Translation can use a local language model or a remote API.
-
-#### General-Purpose Local Models
-
-- LFM 2.5: [lfm2.5-1.2b-instruct](https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct-GGUF)
-- Ministral 3: [ministral-3-8b-instruct](https://huggingface.co/mistralai/Ministral-3-8B-Instruct-2512-GGUF)
-- Gemma 4: [gemma4-e2b-it](https://huggingface.co/unsloth/gemma-4-E2B-it-qat-GGUF), [gemma4-e4b-it](https://huggingface.co/unsloth/gemma-4-E4B-it-qat-GGUF), [gemma4-12b-it](https://huggingface.co/unsloth/gemma-4-12B-it-qat-GGUF), [gemma4-26b-a4b-it](https://huggingface.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF), [gemma4-31b-it](https://huggingface.co/unsloth/gemma-4-31B-it-qat-GGUF)
-- Qwen 3.5: [qwen3.5-0.8b](https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF), [qwen3.5-2b](https://huggingface.co/unsloth/Qwen3.5-2B-GGUF), [qwen3.5-4b](https://huggingface.co/unsloth/Qwen3.5-4B-GGUF), [qwen3.5-9b](https://huggingface.co/unsloth/Qwen3.5-9B-GGUF), [qwen3.5-27b](https://huggingface.co/unsloth/Qwen3.5-27B-GGUF), [qwen3.5-35b-a3b](https://huggingface.co/unsloth/Qwen3.5-35B-A3B-GGUF)
-- Qwen 3.6: [qwen3.6-27b](https://huggingface.co/unsloth/Qwen3.6-27B-GGUF), [qwen3.6-35b-a3b](https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF)
-- Qwen 3.8: [qwen3.8-27b](https://huggingface.co/unsloth/Qwen3.8-27B-GGUF)
-
-#### Uncensored Local Models
-
-- Gemma 4 uncensored: [gemma4-e2b-uncensored](https://huggingface.co/HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive), [gemma4-e4b-uncensored](https://huggingface.co/HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive), [gemma4-12b-uncensored](https://huggingface.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced), [gemma4-26b-a4b-uncensored](https://huggingface.co/HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP), [gemma4-31b-uncensored](https://huggingface.co/HauhauCS/Gemma4-31B-QAT-Uncensored-HauhauCS-Balanced-MTP)
-- Qwen 3.5 uncensored: [qwen3.5-2b-uncensored](https://huggingface.co/HauhauCS/Qwen3.5-2B-Uncensored-HauhauCS-Aggressive), [qwen3.5-4b-uncensored](https://huggingface.co/HauhauCS/Qwen3.5-4B-Uncensored-HauhauCS-Aggressive), [qwen3.5-9b-uncensored](https://huggingface.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive)
-- Qwen 3.6 uncensored: [qwen3.6-27b-uncensored](https://huggingface.co/HauhauCS/Qwen3.6-27B-Uncensored-HauhauCS-Balanced), [qwen3.6-35b-a3b-uncensored](https://huggingface.co/HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive)
-- Qwen 3.8 uncensored: [qwen3.8-27b-uncensored](https://huggingface.co/HauhauCS/Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-MTP-GGUF)
-
-#### Cloud Providers
-
-Hosted LLM providers: [OpenAI](https://platform.openai.com/), [Gemini](https://ai.google.dev/), [Claude](https://www.anthropic.com/api), [Grok](https://docs.x.ai/developers), [MiniMax](https://platform.minimax.io/), [DeepSeek](https://platform.deepseek.com/), and [OpenRouter](https://openrouter.ai/).
-
-#### Machine Translation Providers
-
-Machine-translation providers: [DeepL](https://www.deepl.com/), [Google Cloud Translation](https://cloud.google.com/translate), and [Caiyun](https://fanyi.caiyunapp.com/).
-
-#### OpenAI-Compatible Providers
-
-OpenAI-compatible endpoints are also supported.
-
-## Installation
-
-Download release builds from the [releases page](https://github.com/koharu-rs/koharu/releases/latest). [Installation requirements and first launch](https://koharu.rs/installation) vary by operating system.
-
-Builds are available for Windows, macOS, and Linux.
-
-### WinGet
-
-Install on Windows with [winget](https://learn.microsoft.com/en-us/windows/package-manager/winget/):
-
-```bash
-winget install koharu
+```sh
+adb install -r app-universal-release.apk
 ```
 
-### Homebrew
+You can also copy the APK to the phone and open it. Releases are currently signed with the Android debug key, so they install over earlier alpha and preview builds. They are not Play Store builds. If Android reports a signature mismatch, uninstall the previous build first.
 
-Install on macOS with [Homebrew](https://brew.sh/):
-
-```bash
-brew install --cask koharu
-```
-
-## Troubleshooting
-
-Startup, runtime, model, and provider errors are covered in [Troubleshooting](https://koharu.rs/reference/troubleshooting). Set `RUST_LOG` to `debug` or `trace` for verbose logs:
-
-```bash
-# macOS / Linux
-RUST_LOG=debug koharu
-# Windows (PowerShell)
-$env:RUST_LOG="debug"; koharu.exe
-```
-
-## Development
-
-Platform dependencies and validation commands for local builds are listed in [Development Setup](https://koharu.rs/development/setup).
+## Build from source
 
 ### Prerequisites
 
-- [Rust](https://www.rust-lang.org/tools/install) 1.97.1 or later (Rust 2024 edition)
-- [Bun](https://bun.sh/) 1.3.14 or later
-- [LLVM](https://llvm.org/) 22.1.8 or later
+- Rust 1.97.1 or newer, with the `aarch64-linux-android` and `wasm32-unknown-unknown` targets
+- Bun 1.3.14 or newer
+- JDK 21
+- Android SDK platform 36, build-tools 36.0.0, and NDK `27.2.12479018`
+- `cargo-ndk` 4.1.2
+- The Tauri CLI 3.0.0-alpha.5, installed by the root `bun install`
 
-### Install dependencies
+Export `JAVA_HOME` if Android Studio's JDK or `java` on `PATH` is not the JDK 21 installation.
 
-```bash
+### Debug APK
+
+```sh
+rustup target add aarch64-linux-android wasm32-unknown-unknown
+cargo install cargo-ndk --version 4.1.2 --locked
 bun install
+
+cd crates/koharu
+cargo tauri android init
+cargo tauri icon icons/icon.json
 ```
 
-### Development
+The native runtimes are not committed. Build them with
+[`scripts/android-runtimes/README.md`](scripts/android-runtimes/README.md), or extract a
+runtime bundle into the generated `jniLibs` directory:
 
-```bash
-bun dev
+```sh
+tar -xzf android-runtimes-arm64-v8a.tar.gz \
+  -C gen/android/app/src/main/jniLibs/arm64-v8a
 ```
 
-### Build
+Then build the debug APK:
 
-```bash
-bun run build
+```sh
+cargo tauri android build --debug --target aarch64 --apk
 ```
 
-The executable is written to `target/release`.
+The APK is written to `gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk`.
 
-## Sponsorship
+Release builds and AABs are produced by [`.github/workflows/android.yml`](.github/workflows/android.yml). The CI job fetches the runtime bundle through [`scripts/fetch-android-runtimes.sh`](scripts/fetch-android-runtimes.sh).
 
-If Koharu is useful in your workflow, consider sponsoring the project.
+## How it works
 
-- [GitHub Sponsors](https://github.com/sponsors/mayocream)
-- [Patreon](https://www.patreon.com/mayocream)
+The Android app reuses Koharu's Rust scene, storage, pipeline, and canvas crates, and the same Next.js UI, inside a Tauri WebView. [`crates/koharu-android`](crates/koharu-android) contains the Android plugin: foreground service, sharing, and WebView integration.
 
-![sponsors](./.github/sponsorkit/sponsors.svg)
+The native runtimes are cross-compiled for `aarch64-linux-android`:
 
-## Contributors ❤️
+- llama.cpp for local language-model translation
+- libtorch with the `koharu-torch` shim for detection, OCR, and inpainting
 
-Thanks to all the contributors who have helped make Koharu better!
+The app has no Python runtime, desktop sidecar, or GPU server dependency. CPU inference is the default.
 
-<a href="https://github.com/koharu-rs/koharu/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=koharu-rs/koharu" />
-</a>
+## Status and limitations
+
+- Android support is alpha software; expect model-specific and device-specific differences.
+- The current release supports `arm64-v8a` only.
+- Inpainting is limited to AOT on Android; diffusion-based FLUX and RORem inpainting are not bundled.
+- Performance, memory headroom, and thermal behavior depend heavily on the device.
+- Remote providers and some archive import formats are still being verified on Android.
+
+The milestone plan, architecture notes, and current open work live in [`Android_build_plan.md`](Android_build_plan.md).
+
+## Contributing
+
+Android changes should target this `android` branch. Desktop changes belong on `main` or upstream.
+
+Before changing code, read [`AGENTS.md`](AGENTS.md). Keep the platform boundary intact, test on a physical device when the change affects native behavior, and run the focused checks:
+
+```sh
+bun install
+bun run test
+bun run lint
+```
+
+Device build and runtime details are in [`Android_build_plan.md`](Android_build_plan.md).
 
 ## License
 
 Copyright 2025-2026 Mayo Takanashi and Koharu contributors.
 
-Koharu is dual-licensed under the [MIT License](LICENSE-MIT) or the
-[Apache License, Version 2.0](LICENSE-APACHE), at your option.
+Koharu is dual-licensed under the [MIT License](LICENSE-MIT) or the [Apache License, Version 2.0](LICENSE-APACHE), at your option.
