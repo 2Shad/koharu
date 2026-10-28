@@ -16,13 +16,13 @@
   <a href="#install">Install</a> ·
   <a href="#build-from-source">Build</a> ·
   <a href="Android_build_plan.md">Build plan</a> ·
-  <a href="https://github.com/koharu-rs/koharu">Desktop app</a>
+  <a href="https://github.com/2Shad/koharu/releases">Releases</a>
 </p>
 
-**Koharu Android** is the Android port of [Koharu](https://github.com/koharu-rs/koharu), an ML-powered manga translator. It runs the translation pipeline directly on the phone: text detection, OCR, translation, inpainting, and typesetting. The desktop application lives on [`main`](https://github.com/2Shad/koharu/tree/main) and in the upstream [koharu-rs/koharu](https://github.com/koharu-rs/koharu) repository.
+**Koharu Android** runs an ML-powered manga translation pipeline directly on the phone: text detection, OCR, translation, inpainting, and typesetting.
 
 > [!NOTE]
-> This is an alpha port. The desktop app remains the reference implementation, and Android-specific behavior may still differ from it.
+> This is alpha software. Behavior, model support, and performance may change between releases.
 
 ## What works
 
@@ -32,9 +32,9 @@
 - AOT inpainting on device.
 - Multi-page projects, a touch-first canvas, page swiping, and hold-to-reorder pages.
 - Background processing through an Android foreground service.
-- The same project format and Rust pipeline as the desktop app.
+- Local project storage with no external processing service.
 
-Inference is local by default. Downloaded models stay on the device; there is no companion desktop process or remote inference server.
+Inference is local by default. Downloaded models stay on the device; there is no companion process or remote inference server.
 
 ## Requirements
 
@@ -108,7 +108,7 @@ The native runtimes are cross-compiled for `aarch64-linux-android`:
 - llama.cpp for local language-model translation
 - libtorch with the `koharu-torch` shim for detection, OCR, and inpainting
 
-The app has no Python runtime, desktop sidecar, or GPU server dependency. CPU inference is the default.
+The app has no Python runtime or external inference server dependency. CPU inference is the default.
 
 ## Status and limitations
 
@@ -122,7 +122,7 @@ The milestone plan, architecture notes, and current open work live in [`Android_
 
 ## Contributing
 
-Android changes should target this `android` branch. Desktop changes belong on `main` or upstream.
+Android changes should target this `android` branch.
 
 Before changing code, read [`AGENTS.md`](AGENTS.md). Keep the platform boundary intact, test on a physical device when the change affects native behavior, and run the focused checks:
 
