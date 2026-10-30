@@ -194,11 +194,44 @@ pub struct TranslationConfig {
 impl Default for TranslationConfig {
     fn default() -> Self {
         Self {
-            model: koharu_translator::ModelSelection::default(),
+            model: default_translation_model(),
             generation: GenerationConfig::default(),
             target_language: Language::English,
             instructions: None,
         }
+    }
+}
+
+/// Picks a local model that fits the device's mobile RAM class.
+///
+/// The desktop default (Gemma 4 12B Q4) is larger than every Android resident
+/// budget, so a first launch on a phone has to start from the profile table
+/// instead of accepting a model the loader will refuse.
+fn default_translation_model() -> koharu_translator::ModelSelection {
+    if cfg!(target_os = "android") {
+        mobile_translation_model(
+            koharu_ml::llm::RamClass::for_device().unwrap_or(koharu_ml::llm::RamClass::Low),
+        )
+    } else {
+        koharu_translator::ModelSelection::default()
+    }
+}
+
+fn mobile_translation_model(ram: koharu_ml::llm::RamClass) -> koharu_translator::ModelSelection {
+    use koharu_ml::llm::RamClass;
+    use koharu_translator::{ModelSelection, Provider};
+
+    let (model, quantization) = match ram {
+        RamClass::Low => ("gemma4-e2b-it", "Q2_K_XL"),
+        RamClass::Mid => ("gemma4-e4b-it", "Q2_K_XL"),
+        RamClass::High => ("gemma4-e4b-it", "Q4_K_XL"),
+    };
+    ModelSelection {
+        provider: Provider::Local,
+        model: Some(model.to_owned()),
+        quantization: Some(quantization.to_owned()),
+        vision: false,
+        reasoning: false,
     }
 }
 
@@ -405,6 +438,24 @@ mod tests {
         ));
         assert!(matches!(config.ocr, OcrModel::PaddleOcrVl1_6));
         assert!(matches!(config.inpainting, InpaintingModel::LaMa {}));
+    }
+
+    #[test]
+    fn mobile_translation_profiles_follow_the_ram_class() {
+        use koharu_ml::llm::RamClass;
+
+        for (ram, model, quantization) in [
+            (RamClass::Low, "gemma4-e2b-it", "Q2_K_XL"),
+            (RamClass::Mid, "gemma4-e4b-it", "Q2_K_XL"),
+            (RamClass::High, "gemma4-e4b-it", "Q4_K_XL"),
+        ] {
+            let selection = mobile_translation_model(ram);
+            assert_eq!(selection.model.as_deref(), Some(model));
+            assert_eq!(selection.quantization.as_deref(), Some(quantization));
+            assert_eq!(selection.provider, koharu_translator::Provider::Local);
+            assert!(!selection.vision);
+            assert!(!selection.reasoning);
+        }
     }
 
     #[test]

@@ -61,6 +61,15 @@ impl RamClass {
         }
     }
 
+    /// Resolves the RAM class for the current Android device.
+    ///
+    /// Unknown memory stays in the smallest class so an oversized model is
+    /// refused rather than loaded into an undetected budget.
+    #[must_use]
+    pub fn for_device() -> Option<Self> {
+        cfg!(target_os = "android").then(|| Self::detect().unwrap_or(Self::Low))
+    }
+
     fn detect() -> Option<Self> {
         total_memory_bytes().map(Self::from_total_bytes)
     }

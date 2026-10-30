@@ -2,10 +2,11 @@
 
 Working document for porting Koharu to Android. Written to be picked up cold: each milestone is self-contained and defines what "done" means. Host-specific paths, the device command recipe, and transient measurements live in `Android_build_plan.local.md`, a local-only companion that is not committed.
 
-- **Baseline:** `main` @ `88d07ef0`, workspace version `0.83.5`, Tauri `3.0.0-alpha.5` (git rev `40a2d81d97f5c950e892fa7a6ce8b03064410c4d`), CEF runtime on desktop.
-- **Branch:** `android`. Preview release `android-m5-preview`.
-- **Current state:** the port **processes a full chapter on a physical phone.** Both native runtimes are cross-compiled for `aarch64-linux-android` and bundled (libtorch `2.13` with oneDNN/ACL and the `koharu-torch` shim, llama.cpp `b11642`), so detection -> OCR -> translation -> inpainting -> typeset runs on device. The full 22-page project completes unattended with no `LOW_MEMORY` kill.
-- **Open work:** M2/M3 parity report and docs, the 5.5 GB translation-peak budget, remaining reference devices, packaging, and M6 landing. See [Next session](#next-session--start-here).
+- **Default branch:** `android`. Latest preview release `android-alpha-2`. The README documents the Android-only app; the desktop fork is no longer the preview baseline.
+- **Historical baseline:** `main` @ `88d07ef0`, workspace version `0.83.5`, Tauri `3.0.0-alpha.5` (git rev `40a2d81d97f5c950e892fa7a6ce8b03064410c4d`), CEF runtime on desktop. This is the fork point, kept for reference only; every milestone since M0 targets `android`.
+- **Distribution:** side-load track only. Google Play delivery is out of scope for now; the Play notes below are kept as history for the bundled-runtime decision, not as a current release task.
+- **Current state:** the port **processes a full chapter on a physical phone.** Both native runtimes are cross-compiled for `aarch64-linux-android` and bundled (libtorch `2.13` with oneDNN/ACL and the `koharu-torch` shim, llama.cpp `b11642`), so detection -> OCR -> translation -> inpainting -> typeset runs on device. The full 22-page project completes unattended with no `LOW_MEMORY` kill, and the runtime tarball is published on the `android-runtimes` release.
+- **Open work:** M3 parity report, the 7.6 GB translation peak against the ~5.5 GB budget (M5), the remaining reference devices, packaging, and M6 landing. See [Next session](#next-session--start-here).
 
 ## How to use this document
 
@@ -26,17 +27,21 @@ Rules that apply to every session:
 >
 > **Measured on the reference phone.** Standalone AOT at 975x1401: old native kernel at 768 reached 14.2 GB PSS, oneDNN at 768 5.7 GB, oneDNN at 512 2.7 GB. Detection across 3 pages after mimalloc: PSS 214-364 MB, Scudo flat at 4.5 MB. Full 5-page run: peak 7.38 GB, idle 482 MB. Full 22-page run: no `LOW_MEMORY`, peak 7.6 GB during translation, idle 649 MB. The peak is above the ~5.5 GB `RamClass::High` budget, so the remaining optimization is translation-stage peak, not an OOM blocker.
 >
-> **M2/M3 measurement.** On the reference phone with Q4_K_XL: 21.1 prompt tok/s, 6.57 generated tok/s, 26.7 s/page, 6.1 GB peak RSS. Android parity ran all five pages through detection, OCR, translation, and inpainting (8 s detection, 24-150 s OCR, 31-56 s translation, 25 s inpainting per page) but the report was not written before the session was finalized; rerun the parity command and diff against desktop before publishing M3 parity.
+> **M2/M3 measurement.** On the reference phone (HONOR Magic V5, `MBH-N49`, 16 GB, Snapdragon 8 Elite) with Q4_K_XL: 21.1 prompt tok/s, 6.57 generated tok/s, 26.7 s/page, 6.1 GB peak RSS for the translator benchmark. The row is recorded in `packages/docs/hardware.mdx` (en/ja/zh); thermal is not measured because sysfs reported an invalid value.
+>
+> **Runtime tarball published.** The `android-runtimes` release now carries `android-runtimes-arm64-v8a.tar.gz`, so `scripts/fetch-android-runtimes.sh` resolves and the `release` job's `--require` no longer 404s. The README build section fetches that asset directly.
+>
+> **Still open.** The five-page parity report was not written before the session was finalized; rerun `parity` on device and desktop and compare the reports before publishing M3 parity. The 8 GB mid-range, 12 GB flagship, and 6 GB floor reference devices have no runs yet, and the 7.6 GB full-run peak remains above the ~5.5 GB `RamClass::High` budget.
 
 1. **Fix the multi-page memory defect** (above). Done on device; keep the 22-page run as the regression boundary.
-2. **Finish M3 parity.** Re-run the five-page `parity` report on device and desktop with identical pages/models, then diff boxes, masks, OCR text, and translations. The Android run needs `TMPDIR` inside app cache and writable model links under `cache/koharu/packages`.
+2. **Finish M3 parity.** Re-run the five-page `parity` report on device and desktop with identical pages/models, then compare boxes, masks, OCR text, and translations with `cargo run -p koharu-pipeline --bin parity-diff -- desktop.json android.json`. The Android run needs `TMPDIR` inside app cache and writable model links under `cache/koharu/packages`.
 3. **Reduce translation peak** if the 5.5 GB profile budget is a release requirement. The 22-page run survives without it.
-4. **Publish the runtime tarball.** No code change. `.github/workflows/android.yml` fetches the runtimes via `scripts/fetch-android-runtimes.sh <dest> [--require]`; the preview job requires them only for `android-m*` tags, the `release` job always passes `--require`, so the signed AAB is blocked until the `android-runtimes` release asset exists (currently a 404 at `android-runtimes/android-runtimes-arm64-v8a.tar.gz`). Rebuild the tarball with [Building the Android runtimes](#building-the-android-runtimes), then `gh release create android-runtimes ... <tarball>` and re-tag a preview. Until then the preview APK boots but stops at detection with `<model> needs the Torch runtime...`.
+4. **Runtime tarball:** published on the `android-runtimes` release. Rebuild with [Building the Android runtimes](#building-the-android-runtimes) and `gh release upload android-runtimes <tarball>` only when the bundled libraries change.
 5. **Scale to a chapter.** Done: the full 22-page project processed unattended with no `LOW_MEMORY` kill. Keep the run as the M3 regression boundary and repeat on the 10-page reference set for the M5 matrix.
-6. **M2/M3 numbers:** bench is measured (Q4_K_XL). Finish the parity report, then fill `packages/docs/hardware.mdx` (en/ja/zh). KleidiAI does not accelerate Q2_K_XL, so Q4 is the interesting comparison.
-7. **Packaging:** the universal debug APK is ~842 MB with the runtimes. Strip the runtime libraries; a per-ABI split does not help an `arm64-v8a`-only build, so the remaining route is an AAB feature module / Play asset delivery.
+6. **M2/M3 numbers:** the translator bench is measured (Q4_K_XL) and the reference-phone row is filled across en/ja/zh. The parity report and the other reference devices are still open. KleidiAI does not accelerate Q2_K_XL, so Q4 is the interesting comparison.
+7. **Packaging:** the universal debug APK is ~842 MB with the runtimes. Strip the runtime libraries; a per-ABI split does not help an `arm64-v8a`-only build, so the remaining route is an AAB feature module / Play asset delivery (out of scope while the side-load track is current).
 8. **Still unverified on device:** BYOK remote providers, a long job with the screen off across the full chapter, and import of a real CBZ/RAR.
-9. **M6 landing:** the signed AAB job needs `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, `SENTRY_AUTH_TOKEN` secrets and `SENTRY_ORG`, then `gh workflow run android.yml --ref <version-tag>` (the `release-pr.yml` dispatch exists). It also needs the `android-runtimes` asset from step 4. Then open the upstream issue and split the branch into reviewable PRs.
+9. **M6 landing:** the signed AAB job needs `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, `SENTRY_AUTH_TOKEN` secrets and `SENTRY_ORG`, then `gh workflow run android.yml --ref <version-tag>` (the `release-pr.yml` dispatch exists). The runtime asset is now published. Then open the upstream issue and split the branch into reviewable PRs.
 
 ---
 
@@ -135,7 +140,7 @@ Reference weights (from `crates/koharu-translator/src/local/catalog.rs` and the 
 - [x] Foreground service + notification progress for `process` and downloads; partial wakelock; stop on cancel; notification text is data only.
 - [x] Back button (close sheet/dialog -> cancel gesture -> background, `packages/koharu/lib/back.ts`); `RunEvent::Resumed`/`Suspended`, orientation, soft-keyboard insets; `INTERNET`; first-run storage note; fonts in app-private storage.
 
-**Exit criteria:** import a CBZ, open the project, export a PNG, save an API key, run a long job with the screen off. Verified on device: import, open, PNG/CBZ/PSD export, and the BYOK credential round trip. Left: a CBZ/RAR import, and a long job with the screen off (the memory blocker is gone; screen-off behavior still needs a run). **Risk spike resolved:** `tauri-plugin-dialog` returns opaque `content://` URIs, cannot pick a directory, rejects on cancel, and would force a second copy stage, so `koharu-android` owns one SAF surface.
+**Exit criteria:** import a CBZ, open the project, export a PNG, save an API key, run a long job with the screen off. Verified on device: CBZ and PDF import, project open, PNG/PSD/CBZ export, and the BYOK credential round trip. A page also finished processing with the screen off while the foreground notification reported progress, and the app returned to the same project on resume. Left: RAR import. **Risk spike resolved:** `tauri-plugin-dialog` returns opaque `content://` URIs, cannot pick a directory, rejects on cancel, and would force a second copy stage, so `koharu-android` owns one SAF surface.
 
 ---
 
@@ -145,7 +150,7 @@ Reference weights (from `crates/koharu-translator/src/local/catalog.rs` and the 
 - [x] `Bundled` package source in `koharu-runtime`; Android arms in `Llama::discover`/`library_names()`; CPU probe always, Vulkan behind `android_vulkan` off by default
 - [x] Mobile load profile (`gpu_layers = 0` / Vulkan opt-in offload, mmap, q8 KV cache, performance-core threads, lean `n_ubatch`); RAM class from `/proc/meminfo`; refuse over-budget loads; `koharu-bindgen` Android arm
 - [x] Gemma 4 E4B end-to-end translation: detection -> OCR -> translation -> inpainting -> typeset, English page from a Japanese one
-- [ ] Benchmark harness + numbers per reference device in `packages/docs/hardware.mdx`. Reference phone Q4_K_XL: 21.1 prompt tok/s, 6.57 generated tok/s, 26.7 s/page, 6.1 GB peak RSS. Thermal sysfs was invalid (209 °C), so no thermal value; the remaining reference devices are open.
+- [ ] Benchmark harness + numbers per reference device in `packages/docs/hardware.mdx`. Reference phone row recorded (en/ja/zh), Q4_K_XL: 21.1 prompt tok/s, 6.57 generated tok/s, 26.7 s/page, 6.1 GB translator peak RSS; the full 22-page run peaked at 7.6 GB. Thermal sysfs was invalid (209 °C), so no thermal value. The 8 GB mid-range, 12 GB flagship, and 6 GB floor rows remain open.
 
 **Exit criteria:** a page translated fully on-device in airplane mode, with recorded numbers and no OOM. A page translates correctly and Q4 numbers are recorded on the reference phone; airplane mode and the other reference devices are open. KleidiAI does nothing for Q2_K_XL, so benchmark a Q4 quant.
 
@@ -157,7 +162,7 @@ Reference weights (from `crates/koharu-translator/src/local/catalog.rs` and the 
 - [x] Mobile memory policy: evict between stages; extend CPU-lane OOM `recover()` to unload other models and retry once
 - [x] Detection model decision: PP-DocLayoutV3 / YOLO26s into one output contract (text/onomatopoeia/bubble/panel + masks); mobile default Comic Layout YOLO26s, RF-DETR Seg 2XL stays desktop. Selectable mobile defaults in `pipeline/src/config.rs` (AOT inpainting default, LaMa optional; MangaOCR on mobile)
 - [x] Cross-compile torch 2.13 + `libkoharu-torch.so` (`libtorch_cpu.so` 215 MB, shim 18 MB / 2734 `at_*`/`atg_*` symbols, 16 KB-aligned). Recipe and rationale in [Building the Android runtimes](#building-the-android-runtimes)
-- [ ] Parity check: 5-page set, desktop vs Android -> boxes, masks, OCR text, translations; pass when every page produces a report and the diffs are explained or empty (the `koharu-pipeline` `parity` bin landed; the two reports need the reference device)
+- [ ] Parity check: 5-page set, desktop vs Android -> boxes, masks, OCR text, translations; pass when every page produces a report and the diffs are explained or empty (the `koharu-pipeline` `parity` bin landed; compare the two reports with `parity-diff -- desktop.json android.json`. The reference-device reports have not been written, so parity is not published)
 
 **Exit criteria:** a chapter processes unattended with no OOM kills and a parity report is attached. Verified: all four stages load and run on device; the full 22-page project processed unattended with no `LOW_MEMORY` kill, and the Q4 translator benchmark ran. Remaining: the five-page parity report and desktop diff.
 
@@ -187,8 +192,9 @@ Reference weights (from `crates/koharu-translator/src/local/catalog.rs` and the 
 
 - [x] CI Android job: JDK, SDK, NDK, `tauri android build`, AAB/APK artifacts, keystore signing, `versionCode` synced from release-please. Preview `build` job publishes the debug APK on `android-m*` tags; the signed AAB job has not run.
 - [x] Preview job bundles the native runtimes when published: runs `scripts/fetch-android-runtimes.sh` and extracts into `jniLibs` (preview requires the asset only for `android-m*` tags; `release` always passes `--require`). arm64 ABI split (`--split-per-abi`, not the size fix: the port is `arm64-v8a` only); Sentry Android symbol upload in `.github/sentry.sh`.
-- [x] Docs: Android tab in `installation`, `hardware`, `quickstart` across en/ja/zh.
-- [ ] Play internal-track upload: still manual and unrun (no publisher action is wired, per the no-new-third-party-actions rule). Upstream discussion issue + split PR series (required by `CONTRIBUTING.md`).
+- [x] Docs: Android tab in `installation`, `hardware`, `quickstart` across en/ja/zh; reference-phone benchmark row in `hardware` across all three locales.
+- [ ] Google Play internal-track upload: out of scope for the current side-load track; notes kept as history. Still manual and unrun (no publisher action is wired, per the no-new-third-party-actions rule).
+- [ ] Upstream discussion issue + split PR series (required by `CONTRIBUTING.md`).
 
 ---
 
@@ -272,7 +278,9 @@ Device testing: `adb reverse tcp:3000 tcp:3000` is only needed for `tauri androi
 
 ## Milestone history
 
-One row per milestone. Host-specific detail and session notes live in the local file.| Milestone | When | Result |
+One row per milestone. Host-specific detail and session notes live in the local file.
+
+| Milestone | When | Result |
 |---|---|---|
 | Plan | 2026-10-21 | Repository surveyed; blockers, model profile, and milestones defined. |
 | M0 | 2026-10-21 | Runtime-agnostic `koharu-app`, platform service split, injected paths, lazy ML init, secrets fail soft, NDK sysroot for bindgen, CI workflow. APK installs and boots; WebGPU confirmed on hardware. |
@@ -283,3 +291,4 @@ One row per milestone. Host-specific detail and session notes live in the local 
 | M5 | 2026-10-22 | Native runtimes built and bundled; power-saver profile; text-only translation default. |
 | M6 | 2026-10-22 | Release CI job, runtime fetch into `jniLibs`, arm64 ABI split, Sentry symbol upload, docs. Signed AAB job unrun. |
 | Multi-page memory | 2026-10-23 to 2026-10-24 | OOM removed. Root causes: mimalloc bypassed on Android so tensor frees ratcheted in Scudo; 1280 px detection and AOT im2col fed the churn; page-major eviction reloaded the GGUF per page. Fixes: mimalloc for libtorch, AOT-only oneDNN/ACL, 768 px mobile detection, 512 px mobile AOT, stage-major scheduling. 22-page unattended run passes with no LOW_MEMORY; peak 7.6 GB, idle 649 MB. Q4 bench recorded; parity report still open. |
+| Docs and runtime bundle | 2026-10-27 | `android-runtimes` tarball published; README build section fetches it. Reference-phone benchmark row filled in `hardware.mdx` (en/ja/zh) with the translator numbers, the 7.6 GB full-run peak noted above the ~5.5 GB target, and thermal marked not measured. `parity-diff` documented as the report comparison step. M3 parity, the 8 GB / 12 GB / 6 GB reference rows, and the M5 peak budget remain open. |

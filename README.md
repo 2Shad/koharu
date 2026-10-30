@@ -80,11 +80,11 @@ cargo tauri android init
 cargo tauri icon icons/icon.json
 ```
 
-The native runtimes are not committed. Build them with
-[`scripts/android-runtimes/README.md`](scripts/android-runtimes/README.md), or extract a
-runtime bundle into the generated `jniLibs` directory:
+The native runtimes are not committed. Download the published bundle, or build it with
+[`scripts/android-runtimes/README.md`](scripts/android-runtimes/README.md):
 
 ```sh
+curl -fLO https://github.com/2Shad/koharu/releases/download/android-runtimes/android-runtimes-arm64-v8a.tar.gz
 tar -xzf android-runtimes-arm64-v8a.tar.gz \
   -C gen/android/app/src/main/jniLibs/arm64-v8a
 ```

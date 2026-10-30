@@ -82,23 +82,32 @@ cargo run -p koharu-translator --bin bench -- --model <model.gguf> --quantizatio
 
 为每台参考设备填写一行。加 `--json` 可输出原始记录。
 
-下表中的数据待参考设备实测：翻译列是各 RAM 等级的计划配置，并非实测结果。同样的三个等级也汇总在[支持的设备](/zh/installation#支持的设备)中。
+参考设备一行是使用 Gemma 4 E4B Q4_K_XL 的本地翻译基准实测（单页），并非整章运行。完整的 22 页运行在翻译阶段峰值达到 7.6 GB，未发生 `LOW_MEMORY` 终止，但高于 `RamClass::High` 约 5.5 GB 的目标预算。设备的 thermal sysfs 返回值无效，因此温度未测量。
+
+8 GB 中端、12 GB 旗舰和 6 GB 下限三行仍待参考设备实测。这些单元格有意留空：翻译列是各 RAM 等级的计划配置，并非实测结果。同样的三个等级也汇总在[支持的设备](/zh/installation#支持的设备)中。
 
 | 设备 | SoC | RAM | 量化 | 提示 tok/s | 生成 tok/s | 页面延迟 | 峰值 RSS | 温度 |
 | ---- | --- | --- | ---- | ---------- | ---------- | -------- | -------- | ---- |
-| 8 GB 中端 |  | 8 GB | Q2_K_XL |  |  |  |  |  |
-| 12 GB 旗舰 |  | 12 GB | Q4_K_XL |  |  |  |  |  |
-| 6 GB 下限 |  | 6 GB | Q2_K_XL |  |  |  |  |  |
+| 参考设备：HONOR Magic V5 (MBH-N49) | Snapdragon 8 Elite | 16 GB | Q4_K_XL | 21.1 | 6.57 | 26.7 秒 | 6.1 GB | 未测量 |
+| 8 GB 中端（待参考设备实测） |  | 8 GB | Q2_K_XL |  |  |  |  |  |
+| 12 GB 旗舰（待参考设备实测） |  | 12 GB | Q4_K_XL |  |  |  |  |  |
+| 6 GB 下限（待参考设备实测） |  | 6 GB | Q2_K_XL |  |  |  |  |  |
 
 ### 一致性校验
 
-用同一批页面验证设备端输出与桌面端一致：
+用同一批页面验证设备端输出与桌面端一致。先为每个平台各记录一份报告：
 
 ```sh
 cargo run -p koharu-pipeline --bin parity -- --input <page-directory> --output android.json
 ```
 
-分别在桌面端与设备端运行，然后对比两份 JSON（检测框、掩码摘要、OCR 文本、翻译）。
+在桌面端（`desktop.json`）与设备端（`android.json`）使用相同的页面和模型各运行一次，然后对比两份报告：
+
+```sh
+cargo run -p koharu-pipeline --bin parity-diff -- desktop.json android.json
+```
+
+差异覆盖检测框、掩码摘要、OCR 文本和翻译。参考设备上的一致性结果尚未发布；上方的实测数字来自翻译基准和整章运行，并非一致性结果。
 
 ## 下载与缓存
 

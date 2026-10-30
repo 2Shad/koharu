@@ -89,23 +89,32 @@ cargo run -p koharu-translator --bin bench -- --model <model.gguf> --quantizatio
 
 Fill one row per reference device. Add `--json` for the raw record.
 
-The rows below are pending the reference-device runs: the translation column lists the intended profile for each RAM class, not a measured result. The [supported device matrix](/installation#supported-devices) covers the same three classes.
+The reference-phone row is the local translator benchmark on a single page. It is not a chapter run: the full 22-page run peaked at 7.6 GB during translation with no `LOW_MEMORY` kill, which is above the ~5.5 GB `RamClass::High` target. The device's thermal sysfs returned an invalid value, so thermal is not measured.
+
+The 8 GB mid-range, 12 GB flagship, and 6 GB floor rows are still pending reference-device runs. Their cells stay empty on purpose: the translation column lists the intended profile for each RAM class, not a measured result. The [supported device matrix](/installation#supported-devices) covers the same three classes.
 
 | Device | SoC | RAM | Quant | Prompt tok/s | Generation tok/s | Page latency | Peak RSS | Thermal |
 | ------ | --- | --- | ----- | ------------ | ---------------- | ------------ | -------- | ------- |
-| 8 GB mid-range |  | 8 GB | Q2_K_XL |  |  |  |  |  |
-| 12 GB flagship |  | 12 GB | Q4_K_XL |  |  |  |  |  |
-| 6 GB floor |  | 6 GB | Q2_K_XL |  |  |  |  |  |
+| Reference phone: HONOR Magic V5 (MBH-N49) | Snapdragon 8 Elite | 16 GB | Q4_K_XL | 21.1 | 6.57 | 26.7 s | 6.1 GB | Not measured |
+| 8 GB mid-range (pending reference run) |  | 8 GB | Q2_K_XL |  |  |  |  |  |
+| 12 GB flagship (pending reference run) |  | 12 GB | Q4_K_XL |  |  |  |  |  |
+| 6 GB floor (pending reference run) |  | 6 GB | Q2_K_XL |  |  |  |  |  |
 
 ### Parity harness
 
-Verify that on-device output matches desktop over the same pages:
+Verify that on-device output matches desktop over the same pages. Record one report per platform first:
 
 ```sh
 cargo run -p koharu-pipeline --bin parity -- --input <page-directory> --output android.json
 ```
 
-Run it once on desktop and once on the device, then diff the two JSON reports (detection boxes, mask digests, OCR text, translations).
+Run it once on desktop (`desktop.json`) and once on the device (`android.json`) with the same pages and models, then compare the two reports:
+
+```sh
+cargo run -p koharu-pipeline --bin parity-diff -- desktop.json android.json
+```
+
+The diff covers detection boxes, mask digests, OCR text, and translations. No parity result has been published for the reference phone yet; the measured numbers above come from the translator and full-chapter runs.
 
 ## Downloads and caches
 
