@@ -2,7 +2,7 @@
 
 Working document for porting Koharu to Android. Written to be picked up cold: each milestone is self-contained and defines what "done" means. Host-specific paths, the device command recipe, and transient measurements live in `Android_build_plan.local.md`, a local-only companion that is not committed.
 
-- **Default branch:** `android`. Latest preview release `android-alpha-2`. The README documents the Android-only app; the desktop fork is no longer the preview baseline.
+- **Default branch:** `android`. Latest preview release `android-alpha-3`. The README documents the Android-only app; the desktop fork is no longer the preview baseline.
 - **Historical baseline:** `main` @ `88d07ef0`, workspace version `0.83.5`, Tauri `3.0.0-alpha.5` (git rev `40a2d81d97f5c950e892fa7a6ce8b03064410c4d`), CEF runtime on desktop. This is the fork point, kept for reference only; every milestone since M0 targets `android`.
 - **Distribution:** side-load track only. Google Play delivery is out of scope for now; the Play notes below are kept as history for the bundled-runtime decision, not as a current release task.
 - **Current state:** the port **processes a full chapter on a physical phone.** Both native runtimes are cross-compiled for `aarch64-linux-android` and bundled (libtorch `2.13` with oneDNN/ACL and the `koharu-torch` shim, llama.cpp `b11642`), so detection -> OCR -> translation -> inpainting -> typeset runs on device. The full 22-page project completes unattended with no `LOW_MEMORY` kill, and the runtime tarball is published on the `android-runtimes` release.
